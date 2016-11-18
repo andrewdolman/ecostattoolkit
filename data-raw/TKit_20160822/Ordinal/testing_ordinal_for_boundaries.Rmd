@@ -1,0 +1,287 @@
+---
+title: "Testing ordinal regression for setting boundary values"
+author: "Andrew M. Dolman"
+date: "26 September 2016"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(ordinal)
+
+knitr::opts_chunk$set(cache = T)
+```
+
+
+```{r load_example_data}
+HG<-0.80
+GM<-0.60
+
+#Enter file name and path
+FName<-"../DataTemplate_Example1.csv"
+
+#Get data and check
+data <- read.csv(file = FName, header = TRUE)
+dim(data)
+#summary(data)
+
+#Identify the records with both EQR and TP data to produce a data set without missing values
+cc<-complete.cases(data$EQR,data$P)
+data.cc<-data[cc,]
+dim(data.cc)
+
+data.cc <- data.cc %>% 
+  mutate(BioClass_f = factor(BioClass, ordered = T),
+         BioClass_n = forcats::fct_recode(BioClass_f, "High" = "5"
+                                          , "Good" = "4", "Mod" = "3"
+                                          , "Poor" = "2"),
+         Good_better = forcats::fct_collapse(BioClass_n,
+                                           Good_or_better = c("High", "Good"),
+                                           Mod_or_worse = c("Mod", "Poor")),
+         log_P = log(P)) %>% 
+  tbl_df()
+
+#data.cc$BioClass_n
+#data.cc$Good_better
+```
+
+
+```{r}
+p <- data.cc %>% 
+  ggplot(aes(x = BioClass_n, y = EQR)) %>% 
+  + geom_point() %>% 
+  + geom_hline(aes(yintercept = GM, colour = "GM")) %>%  
+  + geom_hline(aes(yintercept = HG, colour = "HG")) 
+p
+```
+
+
+
+```{r}
+p <- data.cc %>% 
+  ggplot(aes(x = P, y = EQR, colour = factor(Exclude_P))) %>% 
+  + geom_point() 
+p
+```
+
+```{r}
+p <- data.cc %>% 
+  ggplot(aes(x = P, y = EQR, colour = factor(Exclude_P))) %>% 
+  + geom_point() %>% 
+  + scale_x_continuous(trans = "log10")
+p
+```
+
+```{r}
+p <- data.cc %>% 
+  ggplot(aes(x = as.factor(BioClass), y = P)) %>% 
+  + geom_boxplot() 
+p
+```
+
+# Ordinal regression
+
+```{r}
+clm1 <- clm(BioClass_n ~ log_P , data = data.cc, link = "logit")
+summary(clm1)
+cfs <- coef(clm1)
+
+newdat <- data.frame(log_P = log(min(data.cc$P):max(data.cc$P))) %>% 
+  bind_cols(., data.frame(predict(clm1, newdata = .)$fit, check.names = F)) %>% 
+  gather(key = BioClass_n, value = Probability, -log_P) %>% 
+  mutate(P = exp(log_P),
+         BioClass_n = factor(BioClass_n, ordered = TRUE, levels = c("Poor", "Mod", "Good", "High"))) %>% 
+  tbl_df()
+
+p <- newdat %>% 
+  ggplot(aes(x = P, y = Probability, colour = BioClass_n)) %>% 
+  + geom_line() %>% 
+  + geom_vline(xintercept = c(30, 45))
+p
+```
+
+
+```{r}
+
+```
+
+# With GAM
+
+```{r}
+library(mgcv)
+```
+
+# Ordinal regression
+
+```{r}
+gam1 <- gam(I(BioClass-1) ~ s(log_P), family=ocat(R=4), data = data.cc)
+plot(gam1)
+
+#predict(gam1, type="response", se = F)
+
+newdat <- data.frame(log_P = log(min(data.cc$P):max(data.cc$P))) %>% 
+  bind_cols(., data.frame(predict(gam1, newdata = ., type="response", se = F), check.names = F)) %>% 
+  gather(key = BioClass, value = Probability, -log_P) %>% 
+  tbl_df() %>% 
+  mutate(P = exp(log_P),
+         BioClass_n = factor(BioClass, ordered = TRUE, levels = 1:4
+                             , labels = c("Poor", "Mod", "Good", "High"))) %>% 
+  tbl_df()
+
+p <- newdat %>% 
+  ggplot(aes(x = P, y = Probability, colour = BioClass_n, fill = BioClass_n)) %>% 
+  + geom_ribbon(aes(ymax = Probability, ymin = 0), alpha = 0.1) %>% 
+  + scale_x_continuous(trans = "identity") %>% 
+  + geom_vline(xintercept = c(30, 45)) 
+p
+```
+
+```{r}
+newdat <- data.frame(log_P = log(seq(min(data.cc$P), max(data.cc$P), length.out = 2000)))
+preds <- predict(gam1, type="response", se = T, newdata = newdat) %>% 
+  plyr::ldply(.) %>% 
+  bind_cols(bind_rows(newdat, newdat), .) %>% 
+  gather(key = BioClass, value = Probability, -.id, -log_P) %>% 
+  mutate(P = exp(log_P),
+         BioClass_n = factor(BioClass, ordered = TRUE, levels = 1:4
+                             , labels = c("Poor", "Mod", "Good", "High"))) %>% 
+  tbl_df()
+
+
+boundaries <- preds %>% 
+  dplyr::select(BioClass_n, Probability, log_P, .id) %>%
+  distinct() %>% 
+  tidyr::spread(BioClass_n, Probability) %>% 
+  group_by(.id) %>% 
+  filter(.id == "fit") %>% 
+  mutate(P = exp(log_P),
+         diff_HG_MP = (High + Good - Mod - Poor)^2,
+         diff_H_GMP = (High - Good - Mod - Poor)^2,
+         diff_GM = (Good - Mod)^2,
+         diff_HG = (Good - High)^2,
+         diff_MP = (Poor - Mod)^2) %>% 
+  # have to exclude origin x = 0
+  filter(P > 10) %>% 
+  summarise(`High_better` = P[which.min(diff_H_GMP)],
+            `Good_better` = P[which.min(diff_HG_MP)],
+            `M-P` = P[which.min(diff_MP)],
+            `G-M` = P[which.min(diff_GM)],
+            `H-G` = P[which.min(diff_HG)]) %>% 
+  gather(Boundary, Value, -.id)
+  
+
+p <- preds %>% 
+  filter(.id == "fit") %>% 
+  ggplot(aes(x = P, y = Probability, fill = BioClass_n)) %>% 
+  + geom_ribbon(aes(ymax = Probability, ymin = 0), alpha = 0.1, colour = "Grey") %>% 
+  + scale_x_continuous(trans = "identity") %>% 
+  + geom_vline(data = boundaries, aes(xintercept = Value, colour = Boundary))
+p
+```
+
+## Reduce to 2 categories
+
+
+### Lose a lot of information
+```{r}
+gam2 <- data.cc %>% 
+  gam(I(EQR >= GM) ~ s(log_P), family = binomial(link = "logit"), data = .)
+plot(gam2)
+
+newdat <- data.frame(log_P = log(min(data.cc$P):max(data.cc$P))) %>% 
+  mutate(Prob.Good_better = predict(gam2, newdata = ., type="response", se = F)) %>% 
+  tbl_df() %>% 
+  mutate(P = exp(log_P))
+
+p <- newdat %>% 
+  ggplot(aes(x = P, y = Prob.Good_better)) %>% 
+  + geom_line() %>% 
+  + geom_vline(xintercept = c(30, 45)) 
+p
+```
+
+
+### Make stronger assumptions - "logit" linear relationship again 
+```{r}
+glm2 <- data.cc %>% 
+  glm(I(EQR >= GM) ~ log_P, family = binomial(link = "logit"), data = .)
+
+newdat <- data.frame(log_P = log(seq(min(data.cc$P), max(data.cc$P), length.out = 2000)))
+
+newdat <- newdat %>% 
+  mutate(Prob.Good_better = predict(glm2, newdata = ., type="response", se = F)) %>% 
+  tbl_df() %>% 
+  mutate(P = exp(log_P))
+
+newdat %>% 
+  summarise(`Good_better` = P[which.min((Prob.Good_better - 0.5)^2)])
+
+p <- newdat %>% 
+  ggplot(aes(x = P, y = Prob.Good_better)) %>% 
+  + geom_line() %>% 
+  + geom_hline(yintercept = c(0.5)) 
+p
+```
+
+## Just use linear regression on EQR
+
+```{r}
+lm1 <- data.cc %>% 
+  lm(EQR ~ log_P, data = .)
+
+summary(lm1)
+
+newdat <- data.frame(log_P = log(seq(min(data.cc$P), max(data.cc$P), length.out = 2000)))
+
+newdat <- newdat %>% 
+  mutate(EQR = predict(lm1, newdata = .)) %>% 
+  tbl_df() %>% 
+  mutate(P = exp(log_P))
+
+newdat %>% 
+  summarise(`Good_better` = P[which.min((EQR - GM)^2)])
+
+p <- data.cc %>% 
+  ggplot(aes(x = P, y = EQR)) %>% 
+  + geom_point() %>% 
+  + geom_line(data = newdat) %>% 
+  + geom_hline(yintercept = c(GM)) 
+p
+```
+
+
+## Or GAM on EQR
+
+
+```{r}
+gam3 <- data.cc %>% 
+  gam(EQR ~ s(log_P), data = ., gamma = 2)
+
+#plot(gam3)
+
+newdat <- data.frame(log_P = log(seq(min(data.cc$P), max(data.cc$P), length.out = 2000)))
+
+ newdat <- newdat %>% 
+  mutate(EQR = predict(gam3, newdata = .)) %>% 
+  tbl_df() %>% 
+  mutate(P = exp(log_P))
+
+boundaries <-newdat %>% 
+  summarise(`Good_better` = P[which.min((EQR - GM)^2)]) %>% 
+  gather(Boundary, Value)
+
+p <- data.cc %>% 
+  ggplot(aes(x = P, y = EQR)) %>% 
+  + geom_point() %>% 
+  + geom_line(data = newdat) %>% 
+  + geom_vline(data = boundaries, aes(xintercept = Value, colour = Boundary)) %>% 
+  + geom_hline(yintercept = c(GM)) %>% 
+  + scale_x_continuous(trans = "log10")
+p
+```
+
+
