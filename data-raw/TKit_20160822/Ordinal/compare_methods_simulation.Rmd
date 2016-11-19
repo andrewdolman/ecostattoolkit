@@ -12,6 +12,7 @@ library(ggplot2)
 #library(ordinal)
 library(purrr)
 library(mgcv)
+library(ecostattoolkit)
 
 knitr::opts_chunk$set(tidy=TRUE, warning=FALSE, echo=FALSE, dpi = 300, cache = T, autodep = T, fig.height = 8)
 ```
@@ -221,6 +222,28 @@ return(p)
 
 
 ## With measurement error only in the EQR
+
+```{r}
+dat <- get_sim_dat(60, xerr = F)
+
+status_boundaries <- c("HG" = 0.8, "GM" = 0.6, "MP" = 0.4)
+
+boundaries <- boundaries_all(dat, xvar = "log10_TP", yvar = "EQR",
+                             status_boundaries = status_boundaries,
+                             class_var = "Bio_Class")
+
+boundaries <- dat %>% 
+  group_by(Region) %>% 
+  do(boundaries_all(., xvar = "log10_TP", yvar = "EQR",
+                             status_boundaries = status_boundaries,
+                             class_var = "Bio_Class"))
+
+boundaries %>% 
+  select(Region, Method, GM) %>% 
+  spread(Method, GM) %>% 
+  mutate_if(is.numeric, funs(round(10^.)))
+```
+
 
 ```{r}
 set.seed(1)

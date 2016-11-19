@@ -8,8 +8,12 @@ Description: Implements and tests the ECOSTAT toolkit for estimating nutrient
     boundaries. R functions have been created that replicate the original scripts by
     Geoff Phillips.
 Depends:
-    R (>= 3.3.2)
+    R (>= 3.0)
+Imports: lmodel2
 License: MIT + file LICENSE
 Encoding: UTF-8
 LazyData: true
 RoxygenNote: 5.0.1
+Suggests: knitr,
+    rmarkdown
+VignetteBuilder: knitr

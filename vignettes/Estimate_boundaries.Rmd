@@ -1,0 +1,41 @@
+---
+title: "Vignette Title"
+author: "Vignette Author"
+date: "`r Sys.Date()`"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Vignette Title}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+
+## Read in and prepare data
+
+```{r}
+library(ecostattoolkit)
+filename <- system.file("extdata", "DataTemplate_Example1.csv", package = "ecostattoolkit")
+dat <- read.csv(filename)
+
+status_boundaries <- c("HG" = 0.8, "GM" = 0.6, "MP" = 0.4)
+
+dat$status <- cut(dat$EQR,
+                  breaks = rev(c(Inf, status_boundaries, -Inf)),
+                  labels = rev(c("High", "Good", "Moderate", "Poor")))
+
+dat$x.u <- log10(dat$P)
+dat$y.u <- dat$EQR
+
+head(dat)
+```
+
+## Estimate boundaries with all methods
+```{r}
+boundaries <- boundaries_all(dat)
+
+boundaries
+
+dplyr::mutate_if(boundaries, is.numeric, dplyr::funs(round(10^.)))
+```
+
+
