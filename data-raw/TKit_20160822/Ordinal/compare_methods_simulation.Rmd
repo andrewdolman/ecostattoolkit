@@ -2,7 +2,9 @@
 title: "Comparison of methods by simulation"
 author: "Andrew M. Dolman"
 date: "27 September 2016"
-output: pdf_document
+output:
+  word_document: default
+  pdf_document: default
 ---
 
 ```{r setup, echo = FALSE, message=FALSE}
@@ -14,7 +16,7 @@ library(purrr)
 library(mgcv)
 library(ecostattoolkit)
 
-knitr::opts_chunk$set(tidy=TRUE, warning=FALSE, echo=FALSE, dpi = 300, cache = T, autodep = T, fig.height = 8)
+knitr::opts_chunk$set(tidy=TRUE, warning=FALSE, echo=FALSE, dpi = 300, cache = T, autodep = T, fig.height = 6, fig.width = 5)
 ```
 
 ```{r create_simulated_data}
@@ -48,32 +50,42 @@ get_sim_dat <- function(n, xerr = FALSE, slope = -1, boundaries = EQR_boundaries
            Bio_Class_num = as.numeric(Bio_Class)+1) %>%   tbl_df() %>% 
     mutate(log10_TP  = if(xerr){log10_TP + rnorm(n, 0, xerr)}else{log10_TP},
            TP = 10^log10_TP)
+  
+  sim_dat <- sim_dat %>% 
+    filter(Region != "Few high nutrient lakes")
+  
   return(sim_dat)
 }
 
 sim_dat <- get_sim_dat(n = 100, xerr = F)
 ```
 
+# A comparison of methods provided in the ECOSTAT toolkit.
+
+In preparation for the meeting I compared the methods provided in the toolkit. I used simulated data so that I could test each method 100s of times against data with a known relationship between TP and Ecological Status, and with different types of random noise. I also compared how well they work when there are few lakes with low nutrients.
+
+
+## Example simulated data
+
+The data are set up so that the boundary between moderate and good status occurs at TP of 50 µg/L.
 
 
 ```{r}
-p <- sim_dat %>% 
-  ggplot(aes(x = TP)) %>% 
-  + geom_histogram(bins = 15) %>% 
-  + facet_wrap( ~ Region, ncol = 1) %>% 
-  + scale_x_continuous(trans = "log10", breaks = c(1, 5, 10, 50, 100, 500, 1000)) %>% 
-  + annotation_logticks(sides = "b")
-p
-
-
+# p <- sim_dat %>% 
+#   ggplot(aes(x = TP)) %>% 
+#   + geom_histogram(bins = 15) %>% 
+#   + facet_wrap( ~ Region, ncol = 1) %>% 
+#   + scale_x_continuous(trans = "log10", breaks = c(1, 5, 10, 50, 100, 500, 1000)) %>% 
+#   + annotation_logticks(sides = "b")
+# p
 ```
 
 ```{r}
-p <- sim_dat %>% 
-  ggplot(aes(x = EQR)) %>% 
-  + geom_histogram(bins = 15) %>% 
-  + facet_wrap( ~ Region, ncol = 1) #%>% 
-p
+# p <- sim_dat %>% 
+#   ggplot(aes(x = EQR)) %>% 
+#   + geom_histogram(bins = 15) %>% 
+#   + facet_wrap( ~ Region, ncol = 1) #%>% 
+# p
 ```
 
 ```{r}
@@ -82,7 +94,7 @@ p <- sim_dat %>%
   + geom_point() %>% 
   + geom_smooth(method = "lm") %>% 
   + facet_wrap( ~ Region, ncol = 1) %>% 
-  + scale_x_continuous(trans = "log10", breaks = c(1, 5, 10, 50, 100, 500, 1000)) %>% 
+  + scale_x_continuous("TP [µg/L]", trans = "log10", breaks = c(1, 5, 10, 50, 100, 500, 1000)) %>% 
   + annotation_logticks(sides = "b") %>% 
   + geom_hline(data = filter(EQR_boundaries, Boundary == "GM"), aes(yintercept = Value, colour = Boundary)) %>% 
   + geom_vline(data = filter(EQR_boundaries, Boundary == "GM"), aes(xintercept = 50, colour = Boundary))
@@ -90,158 +102,41 @@ p
 ```
 
 
-```{r estimate_TP_boundaries}
-get_TP_boundary_lm <- function(lm_mod){
-  cfs <- coef(lm_mod)
-  10^((EQR_boundaries[EQR_boundaries$Boundary=="GM","Value"] - cfs[1]) / cfs[2])
-}
-
-lm_test <- lm(EQR ~ log10_TP, data = sim_dat)
-#get_TP_boundary_lm(lm_test)
-
-get_TP_boundary_gam_ord <- function(gam_ord_mod){
-  newdat = expand.grid(log10_TP = seq(log10(5), log10(200), length.out = 200))
-  newdat <- bind_cols(newdat, data.frame(predict(gam_ord_mod, type="response", se = F, newdata = newdat)))
-  newdat <- newdat %>% 
-    rename(Poor = X1, Mod = X2, Good = X3, High = X4) %>% 
-    mutate(diff_HG_MP = (High + Good - Mod - Poor)^2,
-           diff_GM = (Good - Mod)^2) %>% 
-    summarise(`GAM_ORD_GM` = 10^(log10_TP[which.min(diff_HG_MP)]))#,
-              #`gam_ord_G-M` = 10^(log10_TP[which.min(diff_GM)]))
-  return(newdat)
-}
-
-gam_test <- gam(I(Bio_Class_num-1) ~ log10_TP, family=ocat(R=4), data = sim_dat)
-
-#get_TP_boundary_gam_ord(gam_test)
-```
-
-```{r mismatch_method}
-get_Mismatch_GM_2 <- function(data){
-  newdat <- expand.grid(TP = seq(min(data$TP), max(data$TP), length.out = 100)) %>%
-    group_by(TP) %>%
-    mutate(TP.not.Good_EQR_Good = sum(data$TP > TP & data$EQR >= 0.6) ,
-           TP.Good_EQR.not.Good = sum(data$TP < TP & data$EQR < 0.6) ,
-           Mismatch_diff = abs(TP.not.Good_EQR_Good - TP.Good_EQR.not.Good)) %>%
-    ungroup() 
-  plot(TP.not.Good_EQR_Good~TP, data = newdat, type = "l")
-  lines(TP.Good_EQR.not.Good~TP, data = newdat, col =  "Red")
-  rug(data$TP)
-   
-  newdat <- newdat %>%
-    summarise(Mismatch_GM = TP[which.min(Mismatch_diff)])
-    
-  return(newdat)
-}
-
-get_Mismatch_GM <- function(data){
-  f <- function(x, data){
-    TP.not.Good_EQR_Good = sum(data$TP > exp(x) & data$EQR >= 0.6, na.rm = T)
-    TP.Good_EQR.not.Good = sum(data$TP < exp(x) & data$EQR < 0.6, na.rm = T)
-    #ratio = (sum(data$TP < 50)) / sum((data$TP >= 50)) 
-    Mismatch_diff = (TP.not.Good_EQR_Good - TP.Good_EQR.not.Good)^2
-    return(Mismatch_diff)
-  }
-  exp(optimize(f, c(log(min(data$TP)), log(max(data$TP))), data = data)$minimum)
-}
-
-#
-# sim_dat <- get_sim_dat(n = 5, xerr = 0)
-# get_Mismatch_GM(sim_dat)
-# get_Mismatch_GM_2(sim_dat)
-# 
-# sim_dat %>% 
-#   group_by(Region) %>% 
-#   summarise(B = get_Mismatch_GM_2(.)$Mismatch_GM)
-
-```
-
-
-```{r}
-get_quantile_methods <- function(data){
-  data %>% 
-    group_by(Bio_Class) %>% 
-    summarise(q25 = quantile(TP, c(0.25)),
-              q50 = quantile(TP, c(0.5)),
-              q75 = quantile(TP, c(0.75))) %>% 
-    gather(quant, Value, -Bio_Class) %>% 
-    unite(Bio_Class_quant, Bio_Class, quant, sep = "_") %>% 
-    spread(Bio_Class_quant, Value) %>% 
-    summarise(Adj_q_GM = mean(c(Good_q75, Moderate_q25), na.rm = T),
-              q50_G = Good_q50,
-              q75_G = Good_q75)
-}
-
-#
-sim_dat <- get_sim_dat(n = 30, xerr = 0.3)
-#get_quantile_methods(sim_dat)
-
-```
-
-
-```{r sim_err_x}
-get_estimates <- function(data){
-  
-  method_types = c(OLS_GM = "Regression", MM_GM = "Mismatch", q50_G = "Quantile",
-                   q75_G = "Quantile", Adj_q_GM = "Quantile")
-  
-  ests <- data %>% 
-    nest(-Region, -Rep) %>% 
-    mutate(lm_fit = map(data, ~ lm(EQR ~ log10_TP, data = .)),
-           #glm_fit = map(data, ~ glm(Bio_Class_2 ~ log10_TP, data = ., family = binomial)),
-           #gam_ord_fit = map(data, ~ gam(I(Bio_Class_num-1) ~ log10_TP, family=ocat(R=4), data = .)),
-           OLS_GM = map(lm_fit, get_TP_boundary_lm),
-           #GLM_GM = map(glm_fit, ~10^MASS::dose.p(., p = 0.5)[1]),
-           #GAM_ORD_GM = map(gam_ord_fit, get_TP_boundary_gam_ord),
-           MM_GM = map(data, ~get_Mismatch_GM(.)),
-           quantile_methods = map(data, ~get_quantile_methods(.)))%>% 
-    unnest(OLS_GM, MM_GM, quantile_methods) %>% 
-    select(-data, -lm_fit) %>% 
-    gather(Method, Value, -Region, -Rep) %>% 
-    mutate(Method_type = method_types[match(Method, names(method_types))],
-           Method = factor(Method, levels = c("q50_G", "q75_G", "Adj_q_GM", "OLS_GM", "MM_GM"), ordered = T))
-  
-  return(ests)
-}
-
-```
-
-```{r}
+```{r plotting_function}
 plot_sim_out <- function(dat){
   p <- dat %>% 
-    mutate(Value = ifelse(Value > 1000, Inf, Value)) %>% 
-  ggplot(aes(x = Method, y = Value, fill = Method_type)) %>% 
+    mutate(GM = ifelse(GM > 1000, Inf, GM)) %>%
+    ggplot(aes(x = Method, y = GM, fill = Method_type)) %>% 
   + geom_hline(yintercept = 50) %>% 
   + geom_boxplot() %>% 
-  + facet_wrap(~ Region, nrow = 2) %>% 
+  + facet_wrap(~ Region, nrow = 3) %>% 
   + labs(y = "Target nutrient concentration") %>% 
     + expand_limits(y = 0)
 return(p)
 }
 ```
 
+# Compare methods
+
+
+* Quantile methods
+    + Medians = Median nutrient concentration for Good lakes
+    + q75 = 75 percentile of nutrient concentration for Good lakes
+    + AdjQ = Adjusted Quantiles (mean of q25 for Moderate lakes and q75 for Good lakes)
+* Regression methods
+    + OLS = Ordinary Least Square Regression
+    + RMA = Ranged Major Axis regression (Type II regression)
+* Mismatch
+    + MM  = Mismatch method
 
 ## With measurement error only in the EQR
 
 ```{r}
-dat <- get_sim_dat(60, xerr = F)
-
 status_boundaries <- c("HG" = 0.8, "GM" = 0.6, "MP" = 0.4)
 
-boundaries <- boundaries_all(dat, xvar = "log10_TP", yvar = "EQR",
-                             status_boundaries = status_boundaries,
-                             class_var = "Bio_Class")
+method_types = c(OLS = "Regression", MM = "Mismatch", Median = "Quantile",
+                   q75 = "Quantile", AdjQ = "Quantile", RMA = "Regression")
 
-boundaries <- dat %>% 
-  group_by(Region) %>% 
-  do(boundaries_all(., xvar = "log10_TP", yvar = "EQR",
-                             status_boundaries = status_boundaries,
-                             class_var = "Bio_Class"))
-
-boundaries %>% 
-  select(Region, Method, GM) %>% 
-  spread(Method, GM) %>% 
-  mutate_if(is.numeric, funs(round(10^.)))
 ```
 
 
@@ -249,163 +144,159 @@ boundaries %>%
 set.seed(1)
 sim_out_errY <- plyr::ldply(1:100, function(x) get_sim_dat(60, xerr = F) %>%
                               mutate(Rep = x)) %>% 
-  tbl_df() %>%
-  get_estimates(.) 
+  tbl_df()
 
-plot_sim_out(sim_out_errY)
+boundaries_errY <- sim_out_errY %>% 
+  group_by(Region, Rep) %>% 
+  do(boundaries_all(., xvar = "log10_TP", yvar = "EQR",
+                             status_boundaries = status_boundaries,
+                             class_var = "Bio_Class")) %>% 
+  mutate_if(is.numeric, funs((10^.))) %>% 
+  mutate(Method_type = method_types[match(Method, names(method_types))],
+         Method = factor(Method, levels = c("Median", "q75", "AdjQ", "OLS", "RMA", "MM"), ordered = T))
 ```
-
-
-## With 1/2 (proportional) observation error in nutrient measurements compared to EQR 
-
 
 ```{r}
-sim_out_errX0.5Y <- plyr::ldply(1:100, function(x) get_sim_dat(60, xerr = 0.15) %>%
-                              mutate(Rep = x)) %>%
-  tbl_df() %>%
-  get_estimates(.) 
-
-plot_sim_out(sim_out_errX0.5Y)
+boundaries_errY %>% plot_sim_out(.) +
+  labs(title = "Error only in EQR")
 ```
 
-
-
-
 ## With equal (proportional) observation error in nutrient and EQR measurements
-
 
 ```{r}
 sim_out_errXY <- plyr::ldply(1:100, function(x) get_sim_dat(60, xerr = 0.3) %>%
                               mutate(Rep = x)) %>%
-  tbl_df() %>%
-  get_estimates(.) 
+  tbl_df() 
 
-plot_sim_out(sim_out_errXY)
+boundaries_errXY <- sim_out_errXY %>% 
+  group_by(Region, Rep) %>% 
+  do(boundaries_all(., xvar = "log10_TP", yvar = "EQR",
+                             status_boundaries = status_boundaries,
+                             class_var = "Bio_Class")) %>% 
+  mutate_if(is.numeric, funs((10^.))) %>% 
+  mutate(Method_type = method_types[match(Method, names(method_types))],
+         Method = factor(Method, levels = c("Median", "q75", "AdjQ", "OLS", "RMA", "MM"), ordered = T))
+
+
 ```
 
-
-## With extra (proportional) observation error in nutrient and EQR measurements
+```{r}
+boundaries_errXY %>% plot_sim_out(.) +
+  labs(title = "Equal observation error\nin nutrient and EQR measurements")
+```
 
 
 ```{r}
-sim_out_errXXY <- plyr::ldply(1:100, function(x) get_sim_dat(60, xerr = 0.5) %>%
-                              mutate(Rep = x)) %>%
-  tbl_df() %>%
-  get_estimates(.) 
+# # No causal relationship
+# # Given a good data span, estimates by most methods are centered on the median concentration in the data set.
+# # A causal relationship should however be test for in advance
+# 
+# sim_out_slope0 <- plyr::ldply(1:100, function(x) get_sim_dat(60, xerr = 0, slope = 0) %>%
+#                               mutate(Rep = x)) %>%
+#   tbl_df() 
+# 
+# boundaries_slope0 <- sim_out_slope0 %>% 
+#   group_by(Region, Rep) %>% 
+#   do(boundaries_all(., xvar = "log10_TP", yvar = "EQR",
+#                              status_boundaries = status_boundaries,
+#                              class_var = "Bio_Class")) %>% 
+#   mutate_if(is.numeric, funs((10^.))) %>% 
+#   mutate(Method_type = method_types[match(Method, names(method_types))],
+#          Method = factor(Method, levels = c("Median", "q75", "AdjQ", "OLS", "RMA", "MM"), ordered = T))
+# 
+# 
+# boundaries_slope0 %>% plot_sim_out(.) +
+#   labs(title = "No relationship between EQR and TP")
 
-plot_sim_out(sim_out_errXXY)
+
 ```
 
 
+## Extra "outliers"
 
-# Non-linear relationships (after logging)
 
 
 ```{r}
-sim_out_nonlinear <- plyr::ldply(1:100, function(x) get_sim_dat(60, xerr = 0) %>%
-                              mutate(Rep = x, 
-                                     EQR = ifelse(EQR < 0, 0, EQR))) %>%
-  tbl_df() %>%
-  get_estimates(.) 
-
-plot_sim_out(sim_out_nonlinear)
-```
-
-
-## Even less linear
-```{r}
-sim_out_nonlinear <- plyr::ldply(1:100, function(x) get_sim_dat(60, xerr = 0) %>%
-                              mutate(Rep = x, 
-                                     EQR = abs(EQR))) %>%
-  tbl_df() %>%
-  get_estimates(.) 
-
-plot_sim_out(sim_out_nonlinear)
-```
-
-
-# Lower signal to noise
-```{r}
-sim_out_slope0 <- plyr::ldply(1:100, function(x) get_sim_dat(60, xerr = 0, slope = -0.5) %>%
-                              mutate(Rep = x)) %>%
-  tbl_df() %>%
-  get_estimates(.) 
-
-plot_sim_out(sim_out_slope0)
-```
-
-
-# No causal relationship
-```{r}
-sim_out_slope0 <- plyr::ldply(1:100, function(x) get_sim_dat(60, xerr = 0, slope = 0) %>%
-                              mutate(Rep = x)) %>%
-  tbl_df() %>%
-  get_estimates(.) 
-
-plot_sim_out(sim_out_slope0)
-```
-
-
 # Wild outliers
 
-
-```{r}
-sim_out_outliers1 <- plyr::ldply(1:100, function(x) get_sim_dat(60, xerr = 0, slope = -1) %>%
-                              mutate(Rep = x, 
-                                     EQR = EQR + rbinom(length(EQR), 1, 0) * rt(length(EQR), 2),
-                                     Bio_Class = cut(EQR, breaks = c(-Inf, EQR_boundaries$Value, Inf),
-                         labels = rev(c("High", "Good", "Moderate", "Poor")),
-                         ordered_result = TRUE))) %>%
-  tbl_df() %>%
-  get_estimates(.) %>% 
-  mutate(Outliers = "0%")
-
-
-sim_out_outliers2 <- plyr::ldply(1:100, function(x) get_sim_dat(60, xerr = 0, slope = -1) %>%
-                              mutate(Rep = x, 
+sim_out_outliers <- plyr::ldply(1:100, function(x) get_sim_dat(60, xerr = 0, slope = -1) %>%
+                              mutate(Rep = x,
                                      EQR = EQR + rbinom(length(EQR), 1, 0.2) * rt(length(EQR), 2),
                                      Bio_Class = cut(EQR, breaks = c(-Inf, EQR_boundaries$Value, Inf),
                          labels = rev(c("High", "Good", "Moderate", "Poor")),
                          ordered_result = TRUE))) %>%
-  tbl_df() %>%
-  get_estimates(.) %>% 
-  mutate(Outliers = "20%")
+  tbl_df() 
 
-sim_out <- bind_rows(sim_out_outliers1, sim_out_outliers2)
+boundaries_outliers <- sim_out_outliers %>% 
+  group_by(Region, Rep) %>% 
+  do(boundaries_all(., xvar = "log10_TP", yvar = "EQR",
+                             status_boundaries = status_boundaries,
+                             class_var = "Bio_Class")) %>% 
+  mutate_if(is.numeric, funs((10^.))) %>% 
+  mutate(Method_type = factor(method_types[match(Method, names(method_types))]),
+         Method = factor(Method, levels = c("Median", "q75", "AdjQ", "OLS", "RMA", "MM"), ordered = T))
 
-plot_sim_out(sim_out) %>%  
-  + facet_wrap(~Region + Outliers, labeller = "label_both", ncol = 2)
+```
+
+Regression based methods are very sensitive to outliers. Quantile based methods are better than regression methods, but over estimate target when there are few low TP lakes. Mismatch method performs best.
+
+```{r}
+boundaries_outliers %>% plot_sim_out(.) +
+  labs(title = "Error only in EQR, but 20% outliers")
 ```
 
 
+
+```{r}
+boundaries_outliers %>% 
+  subset(., Method_type %in% c("Regression") == FALSE, drop = FALSE) %>% 
+  plot_sim_out(.) +
+  labs(title = "Error only in EQR, but 20% outliers") + 
+  scale_color_discrete(drop = FALSE)
+```
+
+
+```{r}
 ## Wild outliers + slope -0-5
 
-```{r}
-sim_out_outliers1 <- plyr::ldply(1:100, function(x) get_sim_dat(60, xerr = 0, slope = -0.5) %>%
-                              mutate(Rep = x, 
-                                     EQR = EQR + rbinom(length(EQR), 1, 0) * rt(length(EQR), 2),
-                                     Bio_Class = cut(EQR, breaks = c(-Inf, EQR_boundaries$Value, Inf),
-                         labels = rev(c("High", "Good", "Moderate", "Poor")),
-                         ordered_result = TRUE))) %>%
-  tbl_df() %>%
-  get_estimates(.) %>% 
-  mutate(Outliers = "0%")
-
-
-sim_out_outliers2 <- plyr::ldply(1:100, function(x) get_sim_dat(60, xerr = 0, slope = -0.5) %>%
-                              mutate(Rep = x, 
-                                     EQR = EQR + rbinom(length(EQR), 1, 0.2) * rt(length(EQR), 2),
-                                     Bio_Class = cut(EQR, breaks = c(-Inf, EQR_boundaries$Value, Inf),
-                         labels = rev(c("High", "Good", "Moderate", "Poor")),
-                         ordered_result = TRUE))) %>%
-  tbl_df() %>%
-  get_estimates(.) %>% 
-  mutate(Outliers = "20%")
-
-sim_out <- bind_rows(sim_out_outliers1, sim_out_outliers2)
-
-plot_sim_out(sim_out) %>%  
-  + facet_wrap(~Region + Outliers, labeller = "label_both", ncol = 2)
+# sim_out_outliers1 <- plyr::ldply(1:100, function(x) get_sim_dat(60, xerr = 0, slope = -0.5) %>%
+#                               mutate(Rep = x, 
+#                                      EQR = EQR + rbinom(length(EQR), 1, 0) * rt(length(EQR), 2),
+#                                      Bio_Class = cut(EQR, breaks = c(-Inf, EQR_boundaries$Value, Inf),
+#                          labels = rev(c("High", "Good", "Moderate", "Poor")),
+#                          ordered_result = TRUE))) %>%
+#   tbl_df() %>%
+#   get_estimates(.) %>% 
+#   mutate(Outliers = "0%")
+# 
+# 
+# sim_out_outliers2 <- plyr::ldply(1:100, function(x) get_sim_dat(60, xerr = 0, slope = -0.5) %>%
+#                               mutate(Rep = x, 
+#                                      EQR = EQR + rbinom(length(EQR), 1, 0.2) * rt(length(EQR), 2),
+#                                      Bio_Class = cut(EQR, breaks = c(-Inf, EQR_boundaries$Value, Inf),
+#                          labels = rev(c("High", "Good", "Moderate", "Poor")),
+#                          ordered_result = TRUE))) %>%
+#   tbl_df() %>%
+#   get_estimates(.) %>% 
+#   mutate(Outliers = "20%")
+# 
+# sim_out <- bind_rows(sim_out_outliers1, sim_out_outliers2)
+# 
+# plot_sim_out(sim_out) %>%  
+#   + facet_wrap(~Region + Outliers, labeller = "label_both", ncol = 2)
 ```
 
+# Results summary
+
+* All methods perform well when the data range is good and the data have no large outliers
+* Estimates are unbiased (centered around the true value, here 50) and with narrow spread
+    + q75 estimates a different quantity than all the other methods
+* When there are few low nutrient lakes, the quantile method overestimate nutrient boundaries badly. OLS is correct, Mismatch and RMA methods also overestimate but not as bad as quantile methods.
+* When there is observation error in the nutrient  concentration estimates (here TP), and few low TP lakes, OLS estimates boundaries that are too low. RMA and MM get it correct. Quantile methods again overestimate.
+* When there are large outliers, regression methods (RMA and OLS) both can produce very large and small boundary estimates. Estimates from the Quantile and Mismatch methods are more stable, Mismatch is the best. 
+
+
+## Conclusion
+
+Given the stability of the mismatch method in the face of outliers, and the fact that real data will have measurement error in both EQR and nutrient concentrations (e.g. TP) - the Mismatch method might be a good compromise.  
 

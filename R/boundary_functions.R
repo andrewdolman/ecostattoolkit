@@ -22,10 +22,10 @@ boundaries_all <- function(data,
   RMA <- boundaries_RMA(data, yvar, xvar, status_boundaries)
   MM <- boundaries_MM(data, yvar, xvar, status_boundaries)
   AdjQ <- boundaries_AdjQ(data, yvar, xvar, class_var)
-  Medians <- boundaries_medians(data, yvar, xvar, class_var)
+  Median <- boundaries_medians(data, yvar, xvar, class_var)
   q75 <- boundaries_q75(data, yvar, xvar, class_var)
   
-  out <- data.frame(rbind(OLS, RMA, MM, AdjQ, Medians, q75))
+  out <- data.frame(rbind(OLS, RMA, MM, AdjQ, Median, q75))
   boundary_names <- colnames(out)
   out$Method = rownames(out)
   rownames(out) <- NULL
