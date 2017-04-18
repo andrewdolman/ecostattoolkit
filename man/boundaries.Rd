@@ -2,12 +2,13 @@
 % Please edit documentation in R/boundary_functions.R
 \name{boundaries}
 \alias{boundaries}
-\alias{boundaries_AdjQ}
-\alias{boundaries_MM}
-\alias{boundaries_RMA}
 \alias{boundaries_all}
-\alias{boundaries_medians}
 \alias{boundaries_ols}
+\alias{boundaries_ols_XonY}
+\alias{boundaries_RMA}
+\alias{boundaries_MM}
+\alias{boundaries_AdjQ}
+\alias{boundaries_medians}
 \alias{boundaries_q75}
 \title{Functions to calculate boundary nutrient concentrations}
 \usage{
@@ -16,6 +17,9 @@ boundaries_all(data, yvar = "y.u", xvar = "x.u", status_boundaries = c(HG
 
 boundaries_ols(data, yvar = "y.u", xvar = "x.u", status_boundaries = c(HG
   = 0.8, GM = 0.6, MP = 0.4))
+
+boundaries_ols_XonY(data, yvar = "y.u", xvar = "x.u",
+  status_boundaries = c(HG = 0.8, GM = 0.6, MP = 0.4))
 
 boundaries_RMA(data, yvar = "y.u", xvar = "x.u", status_boundaries = c(HG
   = 0.8, GM = 0.6, MP = 0.4))
@@ -52,6 +56,8 @@ Functions to calculate boundary nutrient concentrations
 \item \code{boundaries_all}: A wrapper function to estimate boundaries using all methods
 
 \item \code{boundaries_ols}: Estimates nutrient boundaries using ordinary-least-squares
+
+\item \code{boundaries_ols_XonY}: Estimates nutrient boundaries using ordinary-least-squares
 
 \item \code{boundaries_RMA}: Estimates nutrient boundaries using Ranged Major Axis regression.
 

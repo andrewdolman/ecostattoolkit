@@ -10,14 +10,24 @@ vignette: >
 ---
 
 
-## Read in and prepare data
+## Required packages
 
 ```{r}
 library(ecostattoolkit)
+library(dplyr)
+library(tidyr)
+```
+
+## Read in and prepare data
+```{r}
 filename <- system.file("extdata", "DataTemplate_Example1.csv", package = "ecostattoolkit")
 dat <- read.csv(filename)
 
 status_boundaries <- c("HG" = 0.8, "GM" = 0.6, "MP" = 0.4)
+
+# min and max nutrient value used for model
+nut.min <- 1	
+nut.max <- 138	
 
 dat$status <- cut(dat$EQR,
                   breaks = rev(c(Inf, status_boundaries, -Inf)),
@@ -26,16 +36,48 @@ dat$status <- cut(dat$EQR,
 dat$x.u <- log10(dat$P)
 dat$y.u <- dat$EQR
 
-head(dat)
+knitr::kable(head(dat))
 ```
 
 ## Estimate boundaries with all methods
 ```{r}
-boundaries <- boundaries_all(dat)
+boundaries <- dat %>% 
+  filter(Exclude_P == 0,
+         P <= nut.max,
+         P >= nut.min) %>% 
+  boundaries_all()
 
-boundaries
 
-dplyr::mutate_if(boundaries, is.numeric, dplyr::funs(round(10^.)))
+dplyr::mutate_if(boundaries, is.numeric, dplyr::funs(round(10^., 0))) %>% 
+  select(-MP) %>% 
+  knitr::kable(.)
+
 ```
+
+## Compare with results from scripts in *TKit_20170208_CORRECTED*
+
+```{r gather_script_results, fig.show='hide'}
+source("../data-raw/TKit_20170208_CORRECTED/TKit_fit_lin_mod1.R")
+
+# Collect results
+script.res <- data.frame(
+  Method = c(rep("OLS1_YonX", 2), rep("OLS2_XonY", 2),
+             rep("RMA", 2)),
+  
+  Boundary = c("GM", "HG", "GM", "HG",
+               "GM", "HG"),
+  
+  Value = c(GM.mod1, HG.mod1, GM.mod2, HG.mod2,
+            GM.mod4, HG.mod4),
+  stringsAsFactors = TRUE)
+
+script.res %>% 
+  tidyr::spread(Boundary, Value) %>% 
+  dplyr::select(Method, HG, GM) %>% 
+  arrange(Method) %>% 
+  knitr::kable(.)
+
+```
+
 
 

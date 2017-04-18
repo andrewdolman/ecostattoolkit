@@ -18,14 +18,15 @@ boundaries_all <- function(data,
                        status_boundaries = c("HG" = 0.8, "GM" = 0.6, "MP" = 0.4),
                        class_var = "status"){
   
-  OLS <- boundaries_ols(data, yvar, xvar, status_boundaries)
+  OLS1_YonX <- boundaries_ols(data, yvar, xvar, status_boundaries)
+  OLS2_XonY <- boundaries_ols_XonY(data, yvar, xvar, status_boundaries)
   RMA <- boundaries_RMA(data, yvar, xvar, status_boundaries)
   MM <- boundaries_MM(data, yvar, xvar, status_boundaries)
   AdjQ <- boundaries_AdjQ(data, yvar, xvar, class_var)
   Median <- boundaries_medians(data, yvar, xvar, class_var)
   q75 <- boundaries_q75(data, yvar, xvar, class_var)
   
-  out <- data.frame(rbind(OLS, RMA, MM, AdjQ, Median, q75))
+  out <- data.frame(rbind(OLS1_YonX, OLS2_XonY, RMA, MM, AdjQ, Median, q75))
   boundary_names <- colnames(out)
   out$Method = rownames(out)
   rownames(out) <- NULL
@@ -52,6 +53,25 @@ boundaries_ols <- function(data,
   return(boundaries)
   
 }
+
+#' @describeIn boundaries Estimates nutrient boundaries using ordinary-least-squares
+#' @inheritParams boundaries_lm
+#' @export
+boundaries_ols_XonY <- function(data,
+                           yvar = "y.u",
+                           xvar = "x.u",
+                           status_boundaries = c("HG" = 0.8, "GM" = 0.6, "MP" = 0.4)) {
+  
+  f <- as.formula(paste0(xvar, "~", yvar))
+  lm1 <- lm(f, data = data)
+  cfs <- coef(lm1)
+  
+  boundaries <- cfs[1] + status_boundaries * cfs[2]
+  
+  return(boundaries)
+  
+}
+
 
 #' @describeIn boundaries Estimates nutrient boundaries using Ranged Major Axis regression.
 #' @inheritParams boundaries_lm
