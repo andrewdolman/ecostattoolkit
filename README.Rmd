@@ -59,16 +59,17 @@ knitr::kable(head(dat))
 
 ### Estimate boundaries with all methods
 ```{r}
-boundaries <- dat %>% 
-  filter(Exclude_P == 0,
-         P <= nut.max,
-         P >= nut.min) %>% 
-  boundaries_all()
+dat_sub <- filter(dat, Exclude_P == 0,
+                  P <= nut.max,
+                  P >= nut.min)
+
+boundaries <- boundaries_all(dat)
 
 
-dplyr::mutate_if(boundaries, is.numeric, dplyr::funs(round(10^., 0))) %>% 
-  select(-MP) %>% 
-  knitr::kable(.)
+boundaries <- dplyr::mutate_if(boundaries, is.numeric, dplyr::funs(round(10^., 0))) %>% 
+  select(-MP) 
+
+knitr::kable(boundaries)
 
 ```
 

@@ -61,26 +61,27 @@ knitr::kable(head(dat))
 ### Estimate boundaries with all methods
 
 ``` r
-boundaries <- dat %>% 
-  filter(Exclude_P == 0,
-         P <= nut.max,
-         P >= nut.min) %>% 
-  boundaries_all()
+dat_sub <- filter(dat, Exclude_P == 0,
+                  P <= nut.max,
+                  P >= nut.min)
+
+boundaries <- boundaries_all(dat)
 
 
-dplyr::mutate_if(boundaries, is.numeric, dplyr::funs(round(10^., 0))) %>% 
-  select(-MP) %>% 
-  knitr::kable(.)
+boundaries <- dplyr::mutate_if(boundaries, is.numeric, dplyr::funs(round(10^., 0))) %>% 
+  select(-MP) 
+
+knitr::kable(boundaries)
 ```
 
 | Method     |   HG|   GM|
 |:-----------|----:|----:|
-| OLS1\_YonX |   27|   53|
-| OLS2\_XonY |   30|   43|
-| RMA        |   28|   49|
-| MM         |   31|   45|
-| AdjQ       |   25|   48|
-| Median     |   30|   50|
+| OLS1\_YonX |   27|   61|
+| OLS2\_XonY |   31|   46|
+| RMA        |   29|   53|
+| MM         |   29|   46|
+| AdjQ       |   24|   49|
+| Median     |   31|   51|
 | q75        |   27|   53|
 
 ### Compare with results from scripts in *TKit\_20170208\_CORRECTED*
