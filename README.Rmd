@@ -63,7 +63,7 @@ dat_sub <- filter(dat, Exclude_P == 0,
                   P <= nut.max,
                   P >= nut.min)
 
-boundaries <- boundaries_all(dat)
+boundaries <- boundaries_all(dat_sub)
 
 
 boundaries <- dplyr::mutate_if(boundaries, is.numeric, dplyr::funs(round(10^., 0))) %>% 
@@ -77,7 +77,7 @@ knitr::kable(boundaries)
 
 Run script
 
-```{r, fig.width=5}
+```{r, fig.width=5, dpi=150}
 source(system.file("extdata",
                    "TKit_20170208_CORRECTED/TKit_fit_lin_mod1.R",
                    package = "ecostattoolkit"))
