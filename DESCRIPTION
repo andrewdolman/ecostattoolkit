@@ -1,7 +1,7 @@
 Package: ecostattoolkit
 Title: An R package to implement and test the ECOSTAT toolkit for estimating
     nutrient boundaries
-Version: 0.0.0.9000
+Version: 0.1
 Authors@R: c(person("Geoff", "Phillips", email = "geoff.phillips@stir.ac.uk", role = c("aut")), 
     person("Andrew", "Dolman", email = "andrew.dolman@awi.de", role = c("aut", "cre")))
 Description: Implements and tests the ECOSTAT toolkit for estimating nutrient
@@ -9,7 +9,9 @@ Description: Implements and tests the ECOSTAT toolkit for estimating nutrient
     Geoff Phillips.
 Depends:
     R (>= 3.0)
-Imports: lmodel2
+Imports: lmodel2,
+    dplyr,
+    tidyr
 License: MIT + file LICENSE
 Encoding: UTF-8
 LazyData: true

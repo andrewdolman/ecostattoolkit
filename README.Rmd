@@ -1,24 +1,42 @@
 ---
-title: "Vignette Title"
-author: "Vignette Author"
-date: "`r Sys.Date()`"
-output: rmarkdown::html_vignette
-vignette: >
-  %\VignetteIndexEntry{Vignette Title}
-  %\VignetteEngine{knitr::rmarkdown}
-  %\VignetteEncoding{UTF-8}
+output: github_document
 ---
 
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
 
-## Required packages
 
-```{r}
+#ecostattoolkit
+
+An R package to implement and test the ECOSTAT toolkit for estimating nutrient boundaries.
+
+Implements and tests the ECOSTAT toolkit for estimating nutrient
+boundaries. R functions have been created that replicate the original scripts by
+Geoff Phillips.
+
+
+## Installation
+
+ecostattoolkit can be installed directly from GitHub using the `install_github` function in package `devtools`
+
+```{r install, eval = FALSE}
+# install.packages("devtools")
+devtools::install_github("andrewdolman/ecostattoolkit")
+```
+
+
+## Usage
+
+### Required packages
+
+```{r, message=FALSE, warning=FALSE}
 library(ecostattoolkit)
 library(dplyr)
 library(tidyr)
 ```
 
-## Read in and prepare data
+### Read in and prepare data
 ```{r}
 filename <- system.file("extdata", "DataTemplate_Example1.csv", package = "ecostattoolkit")
 dat <- read.csv(filename)
@@ -39,7 +57,7 @@ dat$y.u <- dat$EQR
 knitr::kable(head(dat))
 ```
 
-## Estimate boundaries with all methods
+### Estimate boundaries with all methods
 ```{r}
 boundaries <- dat %>% 
   filter(Exclude_P == 0,
@@ -54,11 +72,18 @@ dplyr::mutate_if(boundaries, is.numeric, dplyr::funs(round(10^., 0))) %>%
 
 ```
 
-## Compare with results from scripts in *TKit_20170208_CORRECTED*
+### Compare with results from scripts in *TKit_20170208_CORRECTED*
 
-```{r gather_script_results, fig.show='hide'}
-source("../data-raw/TKit_20170208_CORRECTED/TKit_fit_lin_mod1.R")
+Run script
 
+```{r, fig.width=5}
+source(system.file("extdata",
+                   "TKit_20170208_CORRECTED/TKit_fit_lin_mod1.R",
+                   package = "ecostattoolkit"))
+```
+
+
+```{r gather_script_results}
 # Collect results
 script.res <- data.frame(
   Method = c(rep("OLS1_YonX", 2), rep("OLS2_XonY", 2),
@@ -78,6 +103,3 @@ script.res %>%
   knitr::kable(.)
 
 ```
-
-
-

@@ -145,8 +145,8 @@ ymax<- 1.5
 xlb<-expression(paste("total phosphorus ","(?g ", L^-1,")"))
 ylb<-"EQR" # Y axis label
 
-win.graph(width=14,height=4.5)					# new graphic window
-par(mfrow=c(1,3)) 						# delete this line if separate plots are required
+#win.graph(width=14,height=4.5)					# new graphic window
+#par(mfrow=c(1,3)) 						# delete this line if separate plots are required
 par(mar=c(4,5,3.5,1))
 #..........................................................................................
 #	Fig A
@@ -231,6 +231,7 @@ text(xmin,GM+0.03,GM,pos=4)
 text(GM.mod4,ymin,GM.mod4,pos=3)
 text(GMU.mod4,ymin,GMU.mod4,pos=4)
 text(GML.mod4,ymin,GML.mod4,pos=2)
+
 
 ###########################################################################################
 #Output boundary values, 
