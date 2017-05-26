@@ -1,0 +1,1407 @@
+---
+output:
+  word_document
+---
+
+```{r, echo=FALSE}
+knitr::opts_chunk$set(echo=TRUE, message = FALSE, warning = FALSE, cache = TRUE,
+               fig.width = 5, dpi = 150, autodep = TRUE,
+               tidy = TRUE, tidy.opts=list(blank=TRUE, width.cutoff=60))
+```
+
+## Prepare data
+
+```{r}
+library(ecostattoolkit)
+library(tidyverse)
+river_data_veg_mean_station <- ndbrivers::river_data_veg_mean_station %>% 
+  tbl_df()
+
+
+bd <- ndbrivers::ecological_status_boundaries %>% 
+  select(Boundary, Chla_DIN_seasonal_mean_µg_L, Region, River_type_WFD) %>% 
+ # arrange(Chla_DIN_seasonal_mean_µg_L) %>%
+  spread(Boundary, Chla_DIN_seasonal_mean_µg_L)
+
+river_test_data <- river_data_veg_mean_station %>% 
+  filter(is.na(TP_mg_L)==FALSE,
+         is.na(Chla_µg_L)==FALSE,
+         River_type_WFD %in% ndbrivers::phyto_relevant_types) %>% 
+  left_join(., bd) %>% 
+  mutate(BioClass_C = ifelse(Chla_µg_L <= `H/G`, "High", 
+                           ifelse(Chla_µg_L <= `G/M`, "Good", 
+                                  ifelse(Chla_µg_L <= `M/P`, "Moderate",
+                                         ifelse(Chla_µg_L <= `P/B`, "Poor", "Bad")))),
+         BioClass = as.numeric(factor(BioClass_C, 
+                                      levels = rev(c("High", "Good", "Moderate", "Poor", "Bad")),
+                                      ordered  =TRUE))) %>% 
+   transmute(
+    Record = 1:nrow(.),
+    Unique_ID = Station,
+    EQR = Chla_µg_L,
+    P = TP_mg_L * 1000,
+    Exclude_P = 0,
+    N = TN_mg_L * 1000,
+    Exclude_N = 0,
+    BioClass = BioClass,
+    Group = River_type_WFD) 
+
+data <- river_test_data
+```
+
+
+
+
+## A4.2 Data evaluation – check for outliers
+
+The first process in the tool kit is to assess the data. This involves identifying and excluding obvious outliers and for the linear regression methods identifying linear portions of the data.  There are many ways of detecting outliers and any statistical handbook will provide examples, however in the tool kit three approaches are used, a text summary, box and scatter plots.
+
+An example script TKit_check_data.R, with an example data file DataTempate_Example1.csv
+
+###A4.2.1. Step 1 Prepare the work space and enter the data
+
+First clear the R workspace
+```{r}
+#rm(list= ls()) 
+```
+
+
+The data can be quickly checked using R’s generic summary function which returns the minimum and maximum value, 25th, 50th (median), 75th quantiles and the mean for each variable. It also givens the number of missing values (NA).  The maximum and minimum values may give an indication of potential outliers. The R function dim also allows the size of the data.frame to be checked (number rows or records, number of columns or variables).
+
+```{r}
+summary(data)
+dim(data)
+```
+
+Using the example data file, note very high maximum TP and TN values in comparison to the interquartile range.  There are 273 records with 7 columns of data.
+
+### A4.2.2. Step 2 plot data to look for outliers
+
+Boxplots can be used to detect outliers, by default R’s generic boxplot function classifies an observation as an outlier when its value reaches more than 1.5 times the interquartile range. For our purposes the most appropriate approach is to look for P and then N outlier values by biological class (Figure A8.). (Including $out in the boxplot function prints the outlier values in addition to producing the plot, labels are added for the y axis to aid interpretation).
+
+```{r, fig.width = 7, fig.cap="Figure A 8 Range of TP and TN concentrations for water bodies grouped by class"}
+par(mfrow = c(1,2))
+boxplot(data$P ~ as.factor(data$BioClass),ylab="P conc")$out
+boxplot(data$N ~ as.factor(data$BioClass),ylab="N conc")$out	
+par(mfrow = c(1,1))
+```
+
+If the data set contain a grouping variable, such as water body type or country it may be helpful to look for outliers in different groups (parameter las = 3 is used to rotate text to make it readable). Note that with the example data there are too many groups (countries) to provide a useful output.
+
+```{r, eval=FALSE}
+boxplot(data$P ~ as.factor(data$BioClass)+as.factor(data$Group),
+ylab="P",las=3)$out
+```
+
+```{r}
+data %>% 
+  ggplot(aes(x = as.factor(BioClass), y = P)) +
+  geom_boxplot() +
+  facet_wrap(~Group, scales = "free_y")
+```
+
+
+Scatter plots are an alternative and potentially more informative way of identifying outliers as they show a continuous relationship between EQR and TP or TN. 
+
+The R function identify can be used to interact with the plot and label the points that appear to be outliers; the identify function requires the x variable, y variable and a variable to print to be specified. After running the line including the identify function click on the plot near a point that could be an outlier and the Record number will be printed.  To exit the interactive mode right click and select Stop. An example output is shown (Figure A9)
+
+```{r, eval = FALSE}
+plot(data$EQR ~ data$P, log="xy")#note the nutrient axis is set to a log scale
+identify(data$P,data$EQR,data$Record)
+```
+
+```{r}
+data %>% 
+  ggplot(aes(x = P, y = EQR)) + 
+  geom_point() +
+  facet_wrap(~Group, scales = "free") +
+  scale_x_continuous(trans = "log10")+
+  scale_y_continuous(trans = "log10")
+```
+
+
+```{r, echo=FALSE, fig.cap="Figure A 9 Scatter plot showing relationship between EQR and TP, with Record numbers of potential outliers identified."}
+plot(data$EQR ~ data$P,log="x")
+ol <- subset(data, Exclude_P == T)
+text(ol$P, ol$EQR, ol$Record, pos = 1)
+```
+
+
+Note care should be taken when selecting outliers as there is a temptation to remove or “prune” too many values which is not always appropriate.  Having identified possible outliers mark these by editing the original data set by setting the value in field Exclude = 1, alternatively delete the records from the data set, although this does not provide an audit trail or the opportunity to check the potential influence of the outliers on subsequent analysis.  To maintain an audit trail and increase flexibility the took kit scripts assume that outliers are marked rather than deleted, this would allow comparisons of results if outliers were changed in subsequent analyses.
+
+## A4.3 Regression approach 
+
+If linear regression analysis is to be used it is necessary to identify linear regions of the data. The approach used in the tool kit is to examine a scatter plot and to fit a gam model to the data to check the shape of the relationship. Assuming this indicates that the relationship is not linear it then fits a segmented regression to identify where there are significant changes in slope of the relationship.
+
+An example script TKit_check_linearity.R, with an example data file DataTemplate_Example1.csv
+
+### A4.3.1 Identify linear region for modelling
+
+#### A4.3.1.1  Step 1 Prepare the work space and enter the data
+
+For this analysis, we need to load the mgcv and segmented R libraries
+
+```{r}
+library(mgcv)# gam modelling
+library(segmented)# segmented regression
+```
+
+Next load the data, which either has had outliers removed or marked. (note the field Exclude is still required for script to run, even if all outliers have been removed, i.e. all records marked as Exclude = 0, as the variable name Exclude is included in the R scripts as a selection criteria)
+
+```{r}
+#Enter file name and path
+FName <- system.file("extdata/DataTemplate_Example1.csv", package = "ecostattoolkit")
+
+#Get data and check
+data <- read.csv(file = FName, header = TRUE)
+dim(data)
+```
+
+
+As many data sets will contain missing values the data are checked and a second data.frame called data.cc is created with no missing values, although in the example data set there are no missing values.
+
+```{r}
+cc<-complete.cases(data$EQR,data$P)
+data.cc<-data[cc,]
+dim(data.cc)
+```
+
+To make the remaining script simpler the variable names used in the data file are assigned to simpler standard variables which are used for the remainder of the script. Two sets of variables are used, the first contain all the data x, y, z and a second set, which are used for modelling, have had the outliers excluded x.u, y.u, z.u. (note below that when selecting data R requires the use of == rather than =). For plotting, the number of categories (zN) of the Group variable is required so that each is presented in a different colour.
+
+As the relationship between biological status and nutrients is nearly always logarithmic, nutrient values are log10 transformed. (The following example script is for TP, for TN edit the second line changing TP for TN)
+
+
+```{r}
+#All data including outliers (for information)
+x<-log10(data.cc$P) # log10 transform of independent variable
+x2<-10^x # back transformed value for plotting on linear scale
+y<-data.cc$EQR
+z<-as.factor(data.cc$Group) # needs to be a factor to act as categorical variable
+zN<-length(levels(z)) #number of categories in data
+```
+
+
+```{r}
+#Data used for modelling, excluding outliers
+x.u<-log10(data.cc$P[data.cc$Exclude_P==0]) # selects records where Exclude_P = 0
+x2.u<-10^x.u
+y.u<-data.cc$EQR[data.cc$Exclude_P==0]
+z.u<-as.factor(data.cc$Group[data.cc$Exclude_P==0])
+zN<-length(levels(z)) #number of categories in data
+```
+
+
+#### A4.3.1.2 Step 2 Plot data and fit GAM model
+First set up the axis ranges and provide meaningful axis labels.  Edit the values in the lines below to match your data, remember that text for labels needs to be enclosed by “ “.
+
+```{r}
+xmin<-1
+xmax<-1000
+ymin<-0
+ymax<-1.5
+xlb<-expression(paste("total phosphorus ","(µg ", L^-1,")"))
+ylb<-"EQR"
+```
+
+Plot all the data (including outliers) as open circles (not shown)
+
+```{r, eval=FALSE}
+plot(y~x2,log="x",ylim=c(ymin,ymax),xlim=c(xmin,xmax),xlab=xlb,ylab=ylb,cex=1)
+```
+
+Then colour the data that are not outliers by adding these as points. Colours are determined by the Group variable which was assigned to the object z.u. A legend is added at the top right of the plot, to change the legend position edit the 3rd line of script below using alternatives “topleft”,”bottomleft”, “bottomright”.  Note that the size of legend text is determined by cex.
+
+```{r, eval = FALSE}
+points(y.u~x2.u,col=rainbow(zN)[z.u],pch=19)
+legend("topright",levels(z.u),col=rainbow(zN),pch=19,cex=0.8)
+```
+
+Fit a gam model and add fitted line to the plot, the first line of script can be edited to change the value of k if necessary.  This sets the degree of smooth applied by changing the number of knots used
+
+```{r}
+k<-9 # number of knots for smoother, decrease value to produce a smoother curve
+fit.gam<- gam(y.u~s(x.u,k=k))
+print(summary(fit.gam))
+```
+
+To plot the figure:
+
+```{r fig.cap = "Figure A 10 Scatter plot showing relationship between EQR and TP with fitted GAM model, points coloured by type, open circles outliers not used to fit model"}
+new.x.u <- data.frame(x.u = seq(min(x.u, na.rm=T), max(x.u, na.rm=T), length = length(x.u)))
+pred.gam <- predict(fit.gam, newdata=new.x.u, se.fit=TRUE)
+ylower <- pred.gam$fit - pred.gam$se.fit
+yupper <- pred.gam$fit + pred.gam$se.fit
+
+plot(y~x2,log="x",ylim=c(ymin,ymax),xlim=c(xmin,xmax),xlab=xlb,ylab=ylb,cex=1)
+points(y.u~x2.u,col=rainbow(zN)[z.u],pch=19)
+legend("topright",levels(z.u),col=rainbow(zN),pch=19,cex=0.8)
+lines(10^(new.x.u$x.u),(pred.gam$fit), col="black")
+mtext("GAM", side = 3, adj=0,line =0, col="black",cex=0.8)
+mtext(paste("R2=", round(summary(fit.gam)$r.sq,3),sep=""), side = 3, line=0,adj=.5, col="black",cex=0.8)
+pvalue <- summary(fit.gam)$s.pv
+if(pvalue >=0.001) {mtext(paste("p=", round(pvalue,3), sep=""),side = 3, line =0, adj = 1, col = "black",cex=0.8)}
+if(pvalue <0.001) {mtext("p<0.001", side = 3, line= 0, adj = 1, col="black",cex=0.8)}
+```
+
+The plot from the test data set clearly shows that the relationship is not linear, levelling off at both low and high TP concentrations (Figure A10).  It is possible to estimate the linear range by eye, probably 10 – 100 µgTPl-1 but an alternative approach is to use segmented regression. Note that it is much easier to appreciate that these data are not linear than when using the Excel tool kit (Figure A2).
+
+
+#### A4.3.1.3 Step 3 Fit segmented linear model
+
+To fit a segmented regression, it is necessary to estimate the break points. In the test data set curvature is not that marked, thus it is best to start with a single break point. Other data sets may clearly require 2 break points and to accommodate these two different functions have been provided.
+
+First it is necessary to set up two user defined functions Myseg (single break point) and Myseg2 (2 break point). Run the following lines of script to load the user functions into R
+
+```{r}
+Myseg<-function(x2,y,EstBk,EstBk2)
+ {
+ Eb<-log10(EstBk)
+ Eb2<-log10(EstBk)
+ x<-log10(x2)
+ print(mod<-lm(y ~ x))
+ print(o<-segmented(mod,seg.Z=~x,psi=list(x = c(Eb))))#--fit segmented model
+ print(summary(o))
+ print(bkpt<-10^(o$psi[1,2]))
+ # Have to include the plotting code in the function
+ 
+ plot(y~x2,log="x",ylim=c(ymin,ymax),xlim=c(xmin,xmax),xlab=xlb,ylab=ylb,cex=1)
+points(y.u~x2.u,col=rainbow(zN)[z.u],pch=19)
+legend("topright",levels(z.u),col=rainbow(zN),pch=19,cex=0.8)
+lines(10^(new.x.u$x.u),(pred.gam$fit), col="black")
+mtext("GAM", side = 3, adj=0,line =0, col="black",cex=0.8)
+mtext(paste("R2=", round(summary(fit.gam)$r.sq,3),sep=""), side = 3, line=0,adj=.5, col="black",cex=0.8)
+pvalue <- summary(fit.gam)$s.pv
+if(pvalue >=0.001) {mtext(paste("p=", round(pvalue,3), sep=""),side = 3, line =0, adj = 1, col = "black",cex=0.8)}
+if(pvalue <0.001) {mtext("p<0.001", side = 3, line= 0, adj = 1, col="black",cex=0.8)}
+
+ segments(10^(o$psi[1,2]-o$psi[1,3]),ymin,10^(o$psi[1,2]+o$psi[1,3]),ymin)
+ points(10^(o$psi[1,2]),ymin,pch=3,cex=1.5)
+ text(10^(o$psi[1,2]),ymin,round(10^(o$psi[1,2])),pos=3)
+ print(10^(o$psi[1,2]-o$psi[1,3])) # lower estimate of break point
+ print(10^(o$psi[1,2]+o$psi[1,3]))
+ (int<-coef(o)[1])
+ (slope<-coef(o)[2])
+ (slope2<-coef(o)[2] + coef(o)[3])
+ (int2<- int + slope * o$psi[1,2] - slope2 * o$psi[1,2] )
+ abline(int,slope, col="blue")
+ #abline(int2,slope2,col="green")
+ }
+
+```
+
+
+
+```{r}
+Myseg2<-function(x2,y,EstBk,EstBk2)
+ {
+ Eb<-log10(EstBk)
+ Eb2<-log10(EstBk2)
+ x<-log10(x2)
+ print(mod<-lm(y ~ x))
+ print(o<-segmented(mod,seg.Z=~x,psi=list(x = c(Eb,Eb2))))#- segmented model
+ print(summary(o))
+ #First break point
+ print(bkpt<-10^(o$psi[1,2]))
+ 
+ # Have to include the plotting code in the function
+plot(y~x2,log="x",ylim=c(ymin,ymax),xlim=c(xmin,xmax),xlab=xlb,ylab=ylb,cex=1)
+points(y.u~x2.u,col=rainbow(zN)[z.u],pch=19)
+legend("topright",levels(z.u),col=rainbow(zN),pch=19,cex=0.8)
+lines(10^(new.x.u$x.u),(pred.gam$fit), col="black")
+mtext("GAM", side = 3, adj=0,line =0, col="black",cex=0.8)
+mtext(paste("R2=", round(summary(fit.gam)$r.sq,3),sep=""), side = 3, line=0,adj=.5, col="black",cex=0.8)
+pvalue <- summary(fit.gam)$s.pv
+if(pvalue >=0.001) {mtext(paste("p=", round(pvalue,3), sep=""),side = 3, line =0, adj = 1, col = "black",cex=0.8)}
+if(pvalue <0.001) {mtext("p<0.001", side = 3, line= 0, adj = 1, col="black",cex=0.8)}
+
+ segments(10^(o$psi[1,2]-o$psi[1,3]),ymin,10^(o$psi[1,2]+o$psi[1,3]),ymin)
+ points(10^(o$psi[1,2]),ymin,pch=3,cex=1.5)
+ text(10^(o$psi[1,2]),ymin,round(10^(o$psi[1,2])),pos=3)
+ print(10^(o$psi[1,2]-o$psi[1,3])) # lower estimate of break point
+ print(10^(o$psi[1,2]+o$psi[1,3]))
+ #Second break point
+ print(bkpt2<-10^(o$psi[2,2]))
+ segments(10^(o$psi[2,2]-o$psi[2,3]),ymin,10^(o$psi[2,2]+o$psi[2,3]),ymin)
+ points(10^(o$psi[2,2]),ymin,pch=3,cex=1.5)
+ text(10^(o$psi[2,2]),ymin,round(10^(o$psi[2,2])),pos=3)
+ print(10^(o$psi[2,2]-o$psi[2,3])) # lower estimate of break point
+ print(10^(o$psi[2,2]+o$psi[2,3]))
+ #Calculate slopes and intercepts for each segment
+ #Seg1
+ (int<-coef(o)[1])
+ (slope<-coef(o)[2])
+ abline(int,slope, col="green")
+ #Seg2
+ (slope2<-coef(o)[2] + coef(o)[3])
+ (int2<- int + slope * o$psi[1,2] - slope2 * o$psi[1,2] )
+ abline(int2,slope2,col="blue")
+ #Seg3
+ (slope3<-coef(o)[3] + coef(o)[4])
+ (int3<- int2 + slope2 * o$psi[2,2] - slope3 * o$psi[2,2] )
+ abline(int3,slope3,col="red")
+ }
+```
+
+For a single break point edit the first line of script to enter the approximate break point, then run the Myseg function line.
+
+
+```{r, fig.keep='none', results='hide'}
+EstBk<-75  # edit this line with estimated break point
+Myseg(x2.u,y.u,EstBk)
+```
+
+For two break points edit the next two lines of script to enter the approximate break points, then run the Myseg2 function line.
+
+```{r, fig.keep='none', results='hide'}
+EstBk<-25  # edit this line with estimated lower break point
+EstBk2<-100 # edit this line with estimated upper break point
+Myseg2(x2.u,y.u,EstBk,EstBk2)
+```
+
+These scripts add best fit lines to the plot and mark the estimated break points, together with their upper and lower confidence limits, which are printed on the screen as the last lines of output.  e.g. for the 1 break point method the screen shows the list below (Figure A11b).  break point (137), followed by its lower (102) and upper (183) confidence limits
+
+With the example data set fitting two break points produces rather unstable predictions, with the lower break varying from 9 -30 µgl-1, an indication that curvature at the lower end of the relationship is weak and that the uncertainty is high.
+
+```{r, echo=FALSE, results='hide', fig.width=8, results='hold', fig.cap="Figure A 11 Scatter plot showing relationship between EQR and TP with fitted GAM model, with segmented regression lines. a) with two estimated break points at 30 & 125 µgl-1 b) with single estimated break point at 138 µgl-1 (note the break points will only be shown if the y axis starts at 0)"}
+par(mfrow = c(1,2))
+EstBk<-25  # edit this line with estimated lower break point
+EstBk2<-100 # edit this line with estimated upper break point
+
+Myseg2(x2.u,y.u,EstBk,EstBk2)
+
+EstBk<-75  # edit this line with estimated break point
+Myseg(x2.u,y.u,EstBk)
+par(mfrow = c(1,1))
+```
+
+From these outputs, it is possible to determine what range of data can be used to fit a sensible linear relationship.  In this example the curvature is not that great and the estimated break points (30 µgl-1 & 125 µgl-1) would remove many of the data points, thus a single upper limit is used of 138 µgl-1 based on the single break point model. The blue line shows the resulting linear relationship, which tracks the linear portion of the GAM model very closely.  These break points also provide sufficient data above and below the high/good and good/moderate boundary EQR values (0.8 , 0.6) and thus meet the requirements for predicting the TP values at the boundaries. They are also nutrient concentrations that fit with ecological expectations (Phillips et al., 2008). It is important to stress that selecting the segment of data to be used will have a significant influence on the slope of the linear models and thus the predicted boundary values and is to an extent a subjective decision, albeit guided by the gam and segmented regression models. Using the Excel tool different segments of data can quickly be selected and the results compared.
+
+## A4.4 Fit regression models and predict boundary values
+In the case of data from a single water body type the objective is to fit a simple linear regression. As explained in section in section 2.4 there is uncertainty regarding the true slope of the relationship when the independent variable (nutrient concentration) is likely to contain significant uncertainty.  Thus, the tool kit fits 3 models and estimates the boundary values from each model
+
+*	A OLS regression with EQR as the dependent variable
+*	A OLS regression with nutrient concentration as the dependent variable
+*	A type II regression, Ranged Major Axis (RMA) regression (Legendre, 2013)
+
+It should be noted that the script for fitting these models is relatively complex and it is not recommended that users unfamiliar with R should attempt to edit the script and thus the default variables in the example data file should be used wherever possible.
+
+A second more complex script is provided which deals with data that includes different water body types (TKit_fit_lin_mod2.R).  This is useful where data for a single type do not have a sufficient range of nutrient concentrations to fit a robust model, but it can be demonstrated that the types have similar slopes. In this case RMA regression cannot be used and an alternative approach where the slopes of the two OLS regressions are averaged to provide an geometric mean regression which achieves a similar result.
+
+
+### A4.4.1 Simple case 1, data from a single group (Type or Country).
+
+Example script TKit_fit_lin_mod1.R and the data file DataTemplate_Example1.csv (data are from a single lake type)
+For this example, we will continue with TP data, for this analysis we need to load the lmodel2 library. As above we start by clearing the workspace and loading the data
+
+### A4.4.2 Step 1 Prepare work space and load data
+
+```{r}
+library(lmodel2)# Type 2 regression
+
+rm(list= ls())  # Clear data
+```
+
+
+Enter file name and path
+
+```{r}
+FName <- system.file("extdata/DataTemplate_Example1.csv", package = "ecostattoolkit")
+```
+
+Get data and check
+
+```{r}
+data <- read.csv(file = FName, header = TRUE)
+dim(data)
+summary(data)
+```
+
+Edit the following line if TP was to be used
+
+```{r}
+#Identify the records with both EQR and P data
+cc<-complete.cases(data$EQR,data$P)
+data.cc<-data[cc,]
+dim(data.cc)
+```
+
+```{r}
+# Data used for modelling, excluding outliers**
+
+```
+
+Assign all the data to x and y variables, including outliers, (so that the outliers can be plotted for information, they are excluded for model fitting within the script)
+
+```{r}
+x<-log10(data.cc$P)
+x2<-10^x
+y<-data.cc$EQR
+```
+
+Identify the data to be used for modelling, edit the following lines to specify the linear section of the data. In this example the TP data is linear below 138 µgl-1. However, to allow for situations where 2 breaks are needed both a minimum and maximum value are required, with a lower value in this example of 1 µgl-1.
+
+```{r}
+nut.min<-1 # min nutrient value used for model
+nut.max<-138 # max nutrient value used for model
+```
+
+To calculate boundary values EQR boundaries are entered. Edit if normalised boundaries of 0.80 and 0.60 are not appropriate
+
+```{r}
+HG<-0.80
+GM<-0.60
+```
+
+Assign the data, edit the next line if TP or other variable names are used
+
+```{r}
+x.u<-log10(data.cc$P[data.cc$P<=nut.max & data.cc$P>=nut.min & data.cc$Exclude_P==FALSE])
+y.u<-data.cc$EQR[data.cc$P<=nut.max & data.cc$P>=nut.min & data.cc$Exclude_P==FALSE]
+x2.u<-10^x.u  #back transformed x for plotting on linear scale
+```
+
+The following 2 lines allow a check that the number of records for x and y are the same, a useful check if variable names have had to be changed
+
+```{r}
+length(x.u)
+length(y.u)
+```
+
+
+### A4.4.3 Step 2 Fit models and calculate boundaries
+
+Fit OLS model 1 (EQR v Nutrient) and assign intercept to int1 and slope to slope1
+
+```{r}
+summary(mod1<-lm(y.u~x.u))#Fit model
+(int1<-summary(mod1)[[4]][[1]])
+(slope1<-summary(mod1)[[4]][[2]])
+```
+
+Predict values from model 1 and calculate the upper and lower quantiles of the residuals to use as estimates of the possible range of boundary values
+
+```{r}
+pred.y1<-data.frame(predict(mod1),resid(mod1)) #Calculate predicted values and residuals
+(upresid.1<-quantile(resid(mod1),0.75,na.rm=T)) #All residuals
+(lwresid.1<-quantile(resid(mod1),0.25,na.rm=T))
+```
+
+Calculate the good/moderate and high/good boundary values using model 1 parameters (GM.mod1, HG.mod1) and estimate the range of boundary values using the upper and lower quantiles of the residuals (GMU.mod1, GML.mod1, HGU.mod1, HGL.mod1)
+
+```{r}
+(GM.mod1<-round(10^((GM-int1)/slope1),0)) # Predicted GM boundary value
+(GMU.mod1<-round(10^((GM-int1-upresid.1)/slope1),0))
+(GML.mod1<-round(10^((GM-int1-lwresid.1)/slope1),0))
+
+(HG.mod1<-round(10^((HG-int1)/slope1),0)) # Predicted HG boundary value
+(HGU.mod1<-round(10^((HG-int1-upresid.1)/slope1),0))
+(HGL.mod1<-round(10^((HG-int1-lwresid.1)/slope1),0))
+```
+
+Fit OLS model 2 (Nutrient v EQR) and assign intercept to int2 and slope to slope2
+
+```{r}
+summary(mod2<-lm(x.u~y.u)) # Fit model
+(int2<-summary(mod2)[[4]][[1]])
+(slope2<-summary(mod2)[[4]][[2]])
+```
+
+To compare model 2 with model 1 we need to invert the model so that
+
+```{r}
+x = slope2 * y   
+y = 1/slope2 *x
+```
+thus the inverted model has a slope of 1/slope2.
+
+As we know that the definition of the best fit line passes through the point (x̅, y̅) then the intercept value for the inverted model 2 can be calculated as y̅ - x̅/slope2.  This is the value of y when x = 0 which the script assigns to variable y0.
+
+```{r}
+y0<-mean(y.u)- (mean(x.u)/slope2)
+```
+
+Set up a new data.frame with observed data x.u, y.u and calculated y0 from inverted model 2 and add the calculated predicted y values and the model residuals. Calculate the upper and lower quantiles of the residuals to use as estimates of the possible range of boundary values
+
+```{r}
+pred.y2<-data.frame(x.u,y.u,y0) # set up data.frame
+pred.y2<-within(pred.y2,pred.y2<-x.u*1/slope2+y0) # calc predicted values
+pred.y2<-within(pred.y2,resid.2<-y.u-pred.y2) # calc residuals resid.2
+upresid.2<-quantile(pred.y2$resid.2,0.75,na.rm=T)
+lwresid.2<-quantile(pred.y2$resid.2,0.25,na.rm=T)
+```
+
+Calculate the good/moderate and high/good boundary values using inverted model 2 parameters (GM.mod2, HG.mod2) and estimate the range of boundary values using the upper and lower quantiles of the residuals (GMU.mod2, GML.mod2, HGU.mod2, HGL.mod2)
+
+```{r}
+(GM.mod2<-round(10^((GM-y0)*slope2),0)) # Predicted GM boundary value
+(GMU.mod2<-round(10^((GM-y0-upresid.2)*slope2),0))
+(GML.mod2<-round(10^((GM-y0-lwresid.2)*slope2),0))
+
+(HG.mod2<-round(10^((HG-y0)*slope2),0)) # Predicted HG boundary factor (HA)
+(HGU.mod2<-round(10^((HG-y0-upresid.2)*slope2),0))
+(HGL.mod2<-round(10^((HG-y0-lwresid.2)*slope2),0))
+```
+
+Fit model 4 (EQR v Nutrient) using type II Ranged Major Axis (RMA) regression and assign intercept to RMA.int and slope to RMA.slope.  (note model 3 in the Tool Kit is a geometric mean regression calculated by taking the geometric average of the slopes of model 1 and inverted model 2. It is not needed for the simple case of a relationship without a factor).
+
+To fit a RMA regression we use R package lmodel2 which performs a variety of regression methods including RMA
+
+```{r}
+lmod<-lmodel2(y.u~x.u,range.y="relative",range.x="interval",nperm=99)
+lmod # provides a summary of all models including conventional OLS
+(RMA.int<-lmod$regression.results[[2]][[4]])
+(RMA.slope<-lmod$regression.results[[3]][[4]])
+```
+
+Predict values from model 4 and calculate the upper and lower quantiles of the residuals to use as estimates of the possible range of boundary values
+
+```{r}
+pred.yRMA<-x.u*RMA.slope+RMA.int
+(upresid.RMA<-quantile(resid.RMA<-y.u-pred.yRMA,0.75,na.rm=T))
+(lwresid.RMA<-quantile(resid.RMA<-y.u-pred.yRMA,0.25,na.rm=T))
+```
+
+Calculate the good/moderate and high/good boundary values using model 4 parameters (GM.mod4, HG.mod4) and estimate the range of boundary values using the upper and lower quantiles of the residuals (GMU.mod4, GML.mod4, HGU.mod4, HGL.mod4)
+
+```{r}
+(GM.mod4<-round(10^((GM-RMA.int)/RMA.slope),0))#Predicted GM boundary value
+(GML.mod4<-round(10^((GM-RMA.int-lwresid.RMA)/RMA.slope),0))
+(GMU.mod4<-round(10^((GM-RMA.int-upresid.RMA)/RMA.slope),0))
+
+(HG.mod4<-round(10^((HG-RMA.int)/RMA.slope),0))#Predicted HG boundary value
+(HGL.mod4<-round(10^((HG-RMA.int-lwresid.RMA)/RMA.slope),0))
+(HGU.mod4<-round(10^((HG-RMA.int-upresid.RMA)/RMA.slope),0))
+```
+
+### A4.4.4 Step 3 Plot graphs and output boundaries
+
+This section will produce 3 plots comparing the three models and the predicted good/moderate nutrient boundary values. The final section places a copy of the boundary values into the clipboard to allow values to be pasted into Excel to create a summary table
+
+First set up the axis ranges and provide axis labels.  Edit the values in the lines below to match your data.
+
+```{r}
+x<-log10(data.cc$P)
+x2<-10^x
+y<-data.cc$EQR
+xmin<- 5
+xmax<- 500
+ymin<- 0
+ymax<- 1.5
+xlb<-expression(paste("total phosphorus ","(µg ", L^-1,")"))
+ylb<-"EQR" # Y axis label
+```
+
+Create a new graphics window and set up 3 panes with appropriate margins
+
+```{r}
+#win.graph(width=14,height=4.5)# new graphic window
+par(mfrow=c(1,3))
+par(mar=c(4,5,3.5,1))
+```
+
+Set up title for Fig A and produce plot.
+
+```{r}
+title<-"Regression of EQR on P"
+```
+
+First plot all the data as open circles
+
+```{r, eval=FALSE}
+plot(y~x2,ylim=c(ymin,ymax),xlim=c(xmin,xmax),main=title,log="x",ylab=ylb,
+xlab=xlb,las=1)
+```
+
+Mark the data points used for models as solid circles
+
+```{r, eval=FALSE}
+points(y.u~x2.u,pch=19)
+```
+
+Add cross to mark data mean point ( x̅ ,y̅)
+
+```{r, eval=FALSE}
+points((10^mean(x.u)),mean(y.u),pch=3,cex=3) # plot mean of x and y
+```
+
+Extract regression statistics and add to plot. R2, significance, slope and standard error of slope,
+
+```{r, eval=FALSE}
+mtext(paste("R2=", round(summary(mod1)$r.sq,3),sep=""), side = 3,
+line=0,adj=0,col="black",cex=0.8)
+pvalue<-pf(summary(mod1)[[10]][[1]],summary(mod1)[[10]][[2]],
+summary(mod1)[[10]][[3]],lower.tail=F)
+if(pvalue >=0.001) {mtext(paste("p=", round(pvalue,3), sep=""),side = 3, line =0,
+ adj = 0.25,	col = "black",cex=0.8)}
+if(pvalue <0.001) {mtext("p<0.001", side = 3, line= 0, adj = 0.25,
+	col="black",cex=0.8)}
+mtext(paste("slope= ", round(summary(mod1)[[4]][[2]],3)," se ",
+round(summary(mod1)[[4]][[4]],3),sep=""),side = 3,line=0,adj=0.75, col="black",cex=0.8)
+```
+
+Set up data.frame for fitted line and add to plot with upper and lower quartiles of residuals
+
+```{r, eval=FALSE}
+new.x <- data.frame(x = seq(min(x, na.rm=T), max(x, na.rm=T), length =
+	length(x))) # new values of X on log scale
+lines(10^(new.x$x),new.x$x*slope1+int1)
+lines(10^(new.x$x),new.x$x*slope1+int1+upresid.1,lty=2)
+lines(10^(new.x$x),new.x$x*slope1+int1+lwresid.1,lty=2)
+abline("h"=GM,lty=1)
+abline("v"=GM.mod1,lty=1)
+abline("v"=GMU.mod1,lty=3)
+abline("v"=GML.mod1,lty=3)
+text(xmin,GM+0.03,GM,pos=4)
+text(GM.mod1,ymin,GM.mod1,pos=3)
+text(GMU.mod1,ymin,GMU.mod1,pos=4)
+text(GML.mod1,ymin,GML.mod1,pos=2)
+```
+
+Set up title for Fig B and produce plot.
+
+```{r, eval=FALSE}
+title<-"Regression of P on EQR"
+plot(y~x2,ylim=c(ymin,ymax),xlim=c(xmin,xmax),main=title,log="x",ylab=ylb,xlab=xlb,
+ las=1)
+points(y.u~x2.u,pch=19)
+points((10^mean(x.u)),mean(y.u),pch=3,cex=3) # plot mean of x and y on linear
+	scale
+mtext(paste("R2=", round(summary(mod2)$r.sq,3),sep=""), side = 3, line=0,adj=0,
+	col="black",cex=0.8)
+pvalue<-pf(summary(mod2)[[10]][[1]],summary(mod2)[[10]][[2]],
+summary(mod2)[[10]][[3]],lower.tail=F)
+if(pvalue >=0.001) {mtext(paste("p=", pvalue, sep=""),side = 3, line =0, adj =
+	0.25, col = "black",cex=0.8)}
+if(pvalue <0.001) {mtext("p<0.001", side = 3, line= 0, adj = 0.25,
+col="black",cex=0.8)}
+mtext(paste("slope= ", round(1/summary(mod2)[[4]][[2]],3)," se ",
+round(summary(mod2)[[4]][[4]],3),sep=""), side = 3, line=0,adj=0.75,
+col="black",cex=0.8)
+
+new.x <- data.frame(x = seq(min(x, na.rm=T), max(x, na.rm=T), length =
+	length(x)))#new values of X on log scale
+lines(10^(new.x$x),new.x$x*1/slope2+y0)
+lines(10^(new.x$x),new.x$x*1/slope2+y0+upresid.2,lty=2)
+lines(10^(new.x$x),new.x$x*1/slope2+y0+lwresid.2,lty=2)
+abline("h"=GM,lty=1)
+abline("v"=GM.mod2,lty=1)
+abline("v"=GMU.mod2,lty=3)
+abline("v"=GML.mod2,lty=3)
+text(xmin,GM+0.03,GM,pos=4)
+text(GM.mod2,ymin,GM.mod2,pos=3)
+text(GMU.mod2,ymin,GMU.mod2,pos=4)
+text(GML.mod2,ymin,GML.mod2,pos=2)
+```
+
+Set up title for Fig C and produce plot.
+
+```{r, eval = FALSE}
+title<-"Ranged major axis regression EQR v N"
+
+plot(y~x2,ylim=c(ymin,ymax),xlim=c(xmin,xmax),main=title,log="x",ylab=ylb,
+	xlab=xlb,las=1)
+points(y.u~x2.u,pch=19)
+points(10^(mean(x.u)),mean(y.u),pch=3,cex=3)
+mtext(paste("RMA slope=", round(RMA.slope,3),sep=""), side = 3, line=0,adj=0.6,
+	col="black",cex=0.8)
+
+new.x <- data.frame(x = seq(min(x, na.rm=T), max(x, na.rm=T), length = 500))
+lines(10^(new.x$x),new.x$x*RMA.slope+RMA.int)
+lines(10^(new.x$x),new.x$x*RMA.slope+RMA.int+upresid.RMA,lty=2)
+lines(10^(new.x$x),new.x$x*RMA.slope+RMA.int+lwresid.RMA,lty=2)
+abline("h"=GM,lty=1)
+abline("v"=GM.mod4,lty=1)
+abline("v"=GMU.mod4,lty=3)
+abline("v"=GML.mod4,lty=3)
+text(xmin,GM+0.03,GM,pos=4)
+text(GM.mod4,ymin,GM.mod4,pos=3)
+text(GMU.mod4,ymin,GMU.mod4,pos=4)
+text(GML.mod4,ymin,GML.mod4,pos=2)
+```
+
+
+```{r, fig.width=8, fig.height=8, echo=FALSE, fig.cap="Figure A 12 Relationship between EQR and TP concentration in test data set showing a) OLS regression of EQR v TP, b) OLS regression of TP on EQR (inverted to plot on same scales), RMA type II regression.  Predicted good/moderate boundary values shown, cross marks mean of EQR and TP, open circles points not used in model)"}
+par(mfrow=c(2,2))
+par(mar=c(4,5,3.5,1))
+
+plot(y~x2,ylim=c(ymin,ymax),xlim=c(xmin,xmax),main=title,log="x",ylab=ylb,
+xlab=xlb,las=1)
+
+points(y.u~x2.u,pch=19)
+
+points((10^mean(x.u)),mean(y.u),pch=3,cex=3) # plot mean of x and y
+
+mtext(paste("R2=", round(summary(mod1)$r.sq,3),sep=""), side = 3,
+line=0,adj=0,col="black",cex=0.8)
+pvalue<-pf(summary(mod1)[[10]][[1]],summary(mod1)[[10]][[2]],
+summary(mod1)[[10]][[3]],lower.tail=F)
+if(pvalue >=0.001) {mtext(paste("p=", round(pvalue,3), sep=""),side = 3, line =0,
+ adj = 0.25,	col = "black",cex=0.8)}
+if(pvalue <0.001) {mtext("p<0.001", side = 3, line= 0, adj = 0.25,
+	col="black",cex=0.8)}
+mtext(paste("slope= ", round(summary(mod1)[[4]][[2]],3)," se ",
+round(summary(mod1)[[4]][[4]],3),sep=""),side = 3,line=0,adj=0.75, col="black",cex=0.8)
+
+new.x <- data.frame(x = seq(min(x, na.rm=T), max(x, na.rm=T), length =
+	length(x))) # new values of X on log scale
+lines(10^(new.x$x),new.x$x*slope1+int1)
+lines(10^(new.x$x),new.x$x*slope1+int1+upresid.1,lty=2)
+lines(10^(new.x$x),new.x$x*slope1+int1+lwresid.1,lty=2)
+abline("h"=GM,lty=1)
+abline("v"=GM.mod1,lty=1)
+abline("v"=GMU.mod1,lty=3)
+abline("v"=GML.mod1,lty=3)
+text(xmin,GM+0.03,GM,pos=4)
+text(GM.mod1,ymin,GM.mod1,pos=3)
+text(GMU.mod1,ymin,GMU.mod1,pos=4)
+text(GML.mod1,ymin,GML.mod1,pos=2)
+
+title<-"Regression of P on EQR"
+plot(y~x2,ylim=c(ymin,ymax),xlim=c(xmin,xmax),main=title,log="x",ylab=ylb,xlab=xlb,
+ las=1)
+points(y.u~x2.u,pch=19)
+points((10^mean(x.u)),mean(y.u),pch=3,cex=3) # plot mean of x and y on linear
+	scale
+mtext(paste("R2=", round(summary(mod2)$r.sq,3),sep=""), side = 3, line=0,adj=0,
+	col="black",cex=0.8)
+pvalue<-pf(summary(mod2)[[10]][[1]],summary(mod2)[[10]][[2]],
+summary(mod2)[[10]][[3]],lower.tail=F)
+if(pvalue >=0.001) {mtext(paste("p=", pvalue, sep=""),side = 3, line =0, adj =
+	0.25, col = "black",cex=0.8)}
+if(pvalue <0.001) {mtext("p<0.001", side = 3, line= 0, adj = 0.25,
+col="black",cex=0.8)}
+mtext(paste("slope= ", round(1/summary(mod2)[[4]][[2]],3)," se ",
+round(summary(mod2)[[4]][[4]],3),sep=""), side = 3, line=0,adj=0.75,
+col="black",cex=0.8)
+
+new.x <- data.frame(x = seq(min(x, na.rm=T), max(x, na.rm=T), length =
+	length(x)))#new values of X on log scale
+lines(10^(new.x$x),new.x$x*1/slope2+y0)
+lines(10^(new.x$x),new.x$x*1/slope2+y0+upresid.2,lty=2)
+lines(10^(new.x$x),new.x$x*1/slope2+y0+lwresid.2,lty=2)
+abline("h"=GM,lty=1)
+abline("v"=GM.mod2,lty=1)
+abline("v"=GMU.mod2,lty=3)
+abline("v"=GML.mod2,lty=3)
+text(xmin,GM+0.03,GM,pos=4)
+text(GM.mod2,ymin,GM.mod2,pos=3)
+text(GMU.mod2,ymin,GMU.mod2,pos=4)
+text(GML.mod2,ymin,GML.mod2,pos=2)
+
+#Set up title for Fig C and produce plot.
+title<-"Ranged major axis regression EQR v N"
+
+plot(y~x2,ylim=c(ymin,ymax),xlim=c(xmin,xmax),main=title,log="x",ylab=ylb,
+	xlab=xlb,las=1)
+points(y.u~x2.u,pch=19)
+points(10^(mean(x.u)),mean(y.u),pch=3,cex=3)
+mtext(paste("RMA slope=", round(RMA.slope,3),sep=""), side = 3, line=0,adj=0.6,
+	col="black",cex=0.8)
+
+new.x <- data.frame(x = seq(min(x, na.rm=T), max(x, na.rm=T), length = 500))
+lines(10^(new.x$x),new.x$x*RMA.slope+RMA.int)
+lines(10^(new.x$x),new.x$x*RMA.slope+RMA.int+upresid.RMA,lty=2)
+lines(10^(new.x$x),new.x$x*RMA.slope+RMA.int+lwresid.RMA,lty=2)
+abline("h"=GM,lty=1)
+abline("v"=GM.mod4,lty=1)
+abline("v"=GMU.mod4,lty=3)
+abline("v"=GML.mod4,lty=3)
+text(xmin,GM+0.03,GM,pos=4)
+text(GM.mod4,ymin,GM.mod4,pos=3)
+text(GMU.mod4,ymin,GMU.mod4,pos=4)
+text(GML.mod4,ymin,GML.mod4,pos=2)
+```
+
+
+Collect information about the models together with the predicted boundary values into a data.frame called out1.
+
+```{r}
+(out1<-data.frame(
+R2=c(round(summary(mod1)[[9]],3),"",""),
+N=c(length(x.u),"",""),
+slope=c(slope1,RMA.slope,1/slope2),
+int=c(int1,RMA.int,y0),
+GM =c(GM.mod1,GM.mod4,GM.mod2),
+GML=c(GML.mod1,GML.mod4,GML.mod2),
+GMU=c(GMU.mod1,GMU.mod4,GMU.mod2),
+HG =c(HG.mod1,HG.mod4,HG.mod2),
+HGL=c(HGL.mod1,HGL.mod4,HGL.mod2),
+HGU=c(HGU.mod1,HGU.mod4,HGU.mod2)))
+
+```
+
+Data.frame "out1" contains the following values as columns; R2 the number of observations used N, slope, intercept, predicted good/moderate boundary GM, lower and upper estimates of good/moderate boundaries GML GMU, the high/good boundary HG, lower and upper estimates of high/good boundaries HGL HGU. Rows are results for Model 1, Model 3 and Model 2.
+
+<!-- Content of out1 for test data set shown below: -->
+
+
+<!--      R2  N      slope      int GM GML GMU HG HGL HGU -->
+<!-- 1 0.539 87 -0.6916571 1.793354 53  35  72 27  18  37 -->
+<!-- 2          -0.8382970 2.016205 49  35  63 28  20  36 -->
+<!-- 3          -1.2702621 2.672670 43  32  60 30  22  42 -->
+
+Write this to clipboard for pasting into Excel
+
+After formatting and adding titles in Excel a table can be produced (Table A 4)
+
+```{r, eval=FALSE}
+write.table(out1,"clipboard",sep="\t",row.names=F,col.names=F)
+```
+
+
+```{r, eval = FALSE, echo=FALSE}
+knitr::kable(out1, caption = "Table A 4 Summary output from models showing predicted boundary values and ranges derived from the upper and lower quartiles of model residuals")
+```
+
+
+<!-- good/moderate -->
+
+<!-- high/good -->
+
+
+
+<!-- R2 -->
+<!-- N -->
+<!-- slope -->
+<!-- intercept -->
+<!-- Pred -->
+<!-- 25th -->
+<!-- 75th -->
+<!-- Pred -->
+<!-- 25th -->
+<!-- 75th -->
+
+<!-- OLS EQR v TN -->
+<!-- 0.539 -->
+<!-- 87 -->
+<!-- -0.692 -->
+<!-- 1.793 -->
+<!-- 53 -->
+<!-- 35 -->
+<!-- 72 -->
+<!-- 27 -->
+<!-- 18 -->
+<!-- 37 -->
+
+<!-- RMA EQR v TN -->
+
+
+<!-- -0.838 -->
+<!-- 2.016 -->
+<!-- 49 -->
+<!-- 35 -->
+<!-- 63 -->
+<!-- 28 -->
+<!-- 20 -->
+<!-- 36 -->
+
+<!-- OLS TN v EQR -->
+
+
+<!-- -1.270 -->
+<!-- 2.673 -->
+<!-- 43 -->
+<!-- 32 -->
+<!-- 60 -->
+<!-- 30 -->
+<!-- 22 -->
+<!-- 42 -->
+
+The plots that the script produces are shown as Figure A12
+
+
+# A5 Potential Problems
+
+## A5.1 Data does not cover an adequate gradient
+
+For the regression approach it is important that the data cover a sufficiently wide gradient. For example, in parts of Europe there may be few water bodies in good or high status, conversely for some water body types there may be few impacted examples.
+
+An example from a data set of low alkalinity lakes is shown in Figure A13a, only one lake is worse than good status (EQR <0.60). A GAM model clearly indicates that EQR values level off where TP is <7 µgl-1 and a linear model fitted to data above this value needs to be extrapolated to determine the TP value at the good/moderate boundary.  Additionally, the single lake in poor status is likely to be very influential. Fitting a type II model to these data would produce a steeper slope and as the mean of the data lies within high status, some distance from the good/moderate boundary the change in slope would significantly lower the good/moderate TP boundary. This illustrates that it is undesirable to use models where extrapolation is required when setting boundary values.
+
+The best solution would be to obtain data from more impacted lakes of the same lake type, perhaps from a neighboring country, although this introduces additional problems of ensuring that the EQR metric is on a comparable scale.  An alternative solution is to consider fitting a more complex model which includes other lake types. A visual inspection of the scatter plot (Figure A13b), suggests that other lake types have a similar slope to the low alkalinity lakes but have different intercepts. Thus, a model of the form EQR = a Log10[TP] + c + Type, might be appropriate, from which it is possible to calculate boundary values using a common slope and type specific intercepts.
+
+[REQUIRE CODE TO GENERATE THIS FIGURE]
+
+Figure A 13 Relationship between phytoplankton EQR and mean annual TP for a) low alkalinity clear water lakes and b) low (LA), moderate (MA), high (HA) alkalinity clear water and organic lakes. Red lines show gam models, green line linear OLS fit for low alkalinity lakes in range of TP 7-100 µgl-1, black line linear fit to all lake types. Cross marks the mean of EQR and TP for the low alkalinity lakes.
+
+As this may be a relatively common problem an R script to do this is included in the toolkit (TKit_fit_lin_mod2.R). It is stressed that the approach used is not statistically perfect and other better solutions may be available so it is suggested that a statistician should be consulted.  However, the toolkit provides a potential solution.
+
+## A5.1.1 Case 2, data from a more than one group (Type or Country).
+
+Use data in DataTemplate_Example2.csv and script TKit_fit_mod2. In this script, we fit a model that includes a categorical grouping variable, such as lake type that allows a model to be fitted that has the same slope but different intercepts to be calculated for each group (lake type).
+
+The script follows a similar pattern to the previous example and is thus is not described in such detail. It is assumed that prior to running the script outliers have been identified and the linear portion of the data determined. As previously, three regression models are fitted, an OLS of EQR v TP, an OLS of TP v EQR and a geometric mean regression derived from the geometric average of the slopes from the two OLS models (as is used in the Excel toolkit).
+
+The first section of script loads the data, selects records where both EQR and TP data are available and allocates the variables x,y  to the data (Log10 TP & EQR).  In addition, the variable z is used to hold the categorical grouping variable (Group), the as.factor function is used to ensure that numeric codes are treated as categories. The linear part of the data used for modelling are allocated to variables x.u,y.u and z.u, using the variables nut.min and nut.max to define the appropriate range.
+
+
+Prepare the R Session.
+
+```{r}
+rm(list= ls())  		# Clear data
+
+#Enter file name and path
+FName <- system.file("extdata/DataTemplate_Example2.csv", package = "ecostattoolkit")
+
+#Get data and check
+data <- read.csv(file = FName, header = TRUE)
+dim(data)
+summary(data)
+
+#Identify the records with both EQR and TP data to produce a data set without missing values
+cc<-complete.cases(data$EQR,data$P)
+data.cc<-data[cc,]
+dim(data.cc)
+```
+
+
+Get all data for plotting
+
+```{r}
+x<-log10(data.cc$P)
+x2<-10^x
+y<-data.cc$EQR
+z<-as.factor(data.cc$Group)
+zN<-length(levels(z))
+
+
+# Enter the high/good and good/moderate boundary values
+HG<-0.80
+GM<-0.60
+
+# Assign data used for models to x.u and y.u
+nut.min<-7	#min nutrient value used for model
+nut.max<-100	#max nutrient value used for model
+
+x.u<-log10(data.cc$P[data.cc$P<=nut.max &
+	data.cc$P>=nut.min &
+	data.cc$Exclude_P==FALSE])
+y.u<-data.cc$EQR[data.cc$P<=nut.max &
+	data.cc$P>=nut.min &
+	data.cc$Exclude_P==FALSE]
+x2.u<-10^x.u  #back transformed x for plotting on linear scale
+z.u<-as.factor(data.cc$Group[data.cc$P<=nut.max &
+	data.cc$P>=nut.min &
+	data.cc$Exclude_P==FALSE])
+zN.u<-length(levels(z.u))
+
+# Check the data records are the same length
+length(x.u)
+length(y.u)
+length(z.u)
+```
+
+
+For convenience, the next section produces a plot which can be used to check and visualise the data (Figure A14).
+
+```{r, fig.width=4, fig.height=4.5, fig.cap = "Figure A 14 Scatter plot showing relationship between EQR and TP concentration for different groups of water body, in this example lake type (high, moderate, low alkalinity & organic lakes). Open circles show data not used for modelling as they are either outliers or beyond the linear range, included for information."}
+MetricUsed<-"Phytoplankton"
+#	labels for axis
+ylb<-"EQR" # Y axis label
+xlb<-expression(paste("total phosphorus ","(µg ", L^-1,")"))
+
+plot(y~x2,main=MetricUsed,log="x",ylab=ylb,xlab=xlb,
+	las=1)
+points(y.u~x2.u,pch=19,col=rainbow(zN.u)[z.u])
+legend("bottomleft",levels(z.u),col=rainbow(zN.u),pch=19,cex=0.8)
+```
+
+
+The next section is important as it checks whether the proposed modelling approach is appropriate. Three models are compared:
+
+*	mod1 without the categorical variable
+*	mod1a with categorical variable included but without interactions (common slopes)
+*	mod1b with categorical variable and with interaction (different slopes)
+
+The models are compared using the Akaike Information Criterion (AIC), a measure of the relative quality of statistical models.  The model with the lowest AIC being the most appropriate model to use.
+
+Compare models including grouping variable, with and without interaction. With the example data the following output is produced.
+
+```{r}
+summary(mod1<-lm(y.u~x.u))	 #base model, no group variable
+summary(mod1a<-lm(y.u~x.u+z.u))#model with group variable, different intercepts
+summary(mod1b<-lm(y.u~x.u*z.u))#model with interaction term, different slopes & intercept
+AIC(mod1,mod1a,mod1b)		 #compare models, select model with lowest AIC
+```
+
+
+<!--       df        AIC -->
+<!-- mod1   3  -87.85119 -->
+<!-- mod1a  6 -140.58890 -->
+<!-- mod1b  9 -137.17964 -->
+
+It shows that the models including type are substantially better than the simple model (mod1). There is very little difference between the models with and without interaction terms, so it is appropriate to continue using the script which fits models with a common slope (mod1a).
+
+If the model with interaction (mod1b) had a significantly lower AIC, then this indicates that different slopes are needed and analysis of a combined data set in this way would not be appropriate.
+
+Stop at this point if mod1b has the lowest AIC
+
+The next 3 sections fit the two OLS models and then calculate the slope and intercepts for the 3rd model by taking the geometric average of model 1 and the inverted model 2.  For each model different intercepts are calculated for each water body type.  The script has been designed to work with different numbers of categories, but it is probably only appropriate to use up to 5 different categories.  Examination of the model summaries will provide indications as to which types are most different and suggest ways of combining categories.
+
+As in the previous simple example the upper and lower quartiles of the residual are calculated and used to estimate uncertainty of the predicted boundary values.
+
+**Model 1a OLS Y on X + Z**
+```{r}
+summary(mod1a<-lm(y.u~x.u+z.u))
+
+# 	predict values of y from model 1
+pred.y1a<-data.frame(predict(mod1a),resid(mod1a),z.u)#Calculate predicted values and residuals
+
+#	Calculate upper and lower quartiles of residuals for 1st factor
+upresid.1a<-quantile(subset(pred.y1a$resid.mod1a,z.u==levels(z.u)[1]),0.75,na.rm=T)
+lwresid.1a<-quantile(subset(pred.y1a$resid.mod1a,z.u==levels(z.u)[1]),0.25,na.rm=T)
+
+#	Extract the slope for model 1a
+slope1a<-summary(mod1a)[[4]][[2]]
+
+#	Extract the intercept for 1st grouping factor of model 1a
+int1a<-summary(mod1a)[[4]][[1]]
+```
+
+The next lines of script calculate the boundary values and their upper and lower ranges. Initially the values for the 1st grouping factor are determined.
+
+```{r}
+#	Calculate GM and HG boundaries with upper and lower estimates for 1st factor
+GM.mod1a<-round(10^((GM-int1a[1])/slope1a),0)
+GMU.mod1a<-round(10^((GM-int1a[1]-upresid.1a[1])/slope1a),0)
+GML.mod1a<-round(10^((GM-int1a[1]-lwresid.1a[1])/slope1a),0)
+HG.mod1a<-round(10^((HG-int1a[1])/slope1a),0)
+HGU.mod1a<-round(10^((HG-int1a[1]-upresid.1a[1])/slope1a),0)
+HGL.mod1a<-round(10^((HG-int1a[1]-lwresid.1a[1])/slope1a),0)
+```
+
+The intercepts and boundaries for the remaining grouping factors are then determined
+
+```{r}
+#	Extract quartiles of residuals, intercepts, calculate boundaries for
+#	remaining factors on model 1a
+for (i in 2:zN.u){
+	upresid.1a<-cbind(upresid.1a,quantile(subset(pred.y1a$resid.mod1a,z.u==levels(z.u)[i]),0.75,na.rm=T))
+	lwresid.1a<-cbind(lwresid.1a,quantile(subset(pred.y1a$resid.mod1a,z.u==levels(z.u)[i]),0.25,na.rm=T))
+	int1a<-cbind(int1a,(int1a[1]+summary(mod1a)[[4]][[(i+1)]]))
+	GM.mod1a<-cbind(GM.mod1a,round(10^((GM-int1a[i])/slope1a),0))
+	GMU.mod1a<-cbind(GMU.mod1a,round(10^((GM-int1a[i]-upresid.1a[i])/slope1a),0))
+	GML.mod1a<-cbind(GML.mod1a,round(10^((GM-int1a[i]-lwresid.1a[i])/slope1a),0))
+	HG.mod1a<-cbind(HG.mod1a,round(10^((HG-int1a[i])/slope1a),0))
+	HGU.mod1a<-cbind(HGU.mod1a,round(10^((HG-int1a[i]-upresid.1a[i])/slope1a),0))
+	HGL.mod1a<-cbind(HGL.mod1a,round(10^((HG-int1a[i]-lwresid.1a[i])/slope1a),0))
+	}
+```
+
+The results are then placed in a data.frame (Sum.mod1a) to provide a convenient way to view the results of the 1st model and the predicted boundary values.
+
+```{r}
+(Sum.mod1a<-data.frame(
+	R2=c(round(summary(mod1a)[[9]],3)),
+	N=c(length(x.u)),
+	slope=c(1/slope1a),
+	int=c(y0),
+	GM =c(GM.mod1a),
+	GML=c(GML.mod1a),
+	GMU=c(GMU.mod1a),
+	HG =c(HG.mod1a),
+	HGL=c(HGL.mod1a),
+	HGU=c(HGU.mod1a),
+	row.names=levels(z.u)))
+```
+
+This produces the following output, GM the good/moderate boundary, GML & GMU the interquartile range for the good/moderate boundary, HG the high/good boundary and its interquartile range HGL & HGU.  The R2, number of cases, slope.
+
+<!--      R2   N     slope      int GM GML GMU HG HGL HGU -->
+<!-- HA 0.68 165 -1.176002 2.571136 47  38  59 32  25  40 -->
+<!-- LA 0.68 165 -1.176002 2.089956 18  14  23 12  10  16 -->
+<!-- MA 0.68 165 -1.176002 2.213039 24  17  30 16  11  20 -->
+<!-- OR 0.68 165 -1.176002 2.515504 43  28  61 29  19  41 -->
+
+Note that at the end of the script there is a different summary output that allows the different models to be compared for each water body category (type).
+
+Similar approaches are then followed to determine the other models, although the script for model 2 is slightly more complex to allow for the model inversion needed to visualise the output.  Details are not shown here, see script for details and to run the example.
+
+The script then produces a plot comparing each of the models and showing the predicted boundary values (Figure A15). For clarity, the upper and lower ranges of the boundaries are not shown. This section of script starts by setting the axis limits and labels, which for a different example may need to be edited.
+
+```{r, echo=FALSE, results='hide'}
+#..........................................................................................
+#	Model 2a OLS X on Y + Z
+#..........................................................................................
+summary(mod2a<-lm(x.u~y.u+z.u))
+
+#	Extract the slope & intercept for 1st factor for model 2a
+slope2a<-summary(mod2a)[[4]][[2]]
+int2a<-summary(mod2a)[[4]][[1]]
+y0<-(0-int2a)/slope2a
+
+for (i in 2:zN.u){
+	int2a<-cbind(int2a,(int2a[1]+summary(mod2a)[[4]][[(i+1)]]))
+	y0<-cbind(y0,(0-int2a[i])/slope2a)
+	}
+# Set up a data frame with observed x, factor z and add appropriate intercept value y0a for category
+# calculate predicted y values (EQR) and calculate residuals
+
+(pred.y2a<-data.frame(x.u,y.u,z.u,y0[1]))
+colnames(pred.y2a)[4]<-"y0.i"
+for (i in 2:zN.u){
+	pred.y2a<-within(pred.y2a,y0.i[z.u==levels(z.u)[i]]<-y0[i])
+	}
+(pred.y2a<-within(pred.y2a,pred.y2a<-x.u*1/slope2a+y0.i))	#calc predicted values pred.y2
+(pred.y2a<-within(pred.y2a,resid.2a<-y.u-pred.y2a))		#calc residuals resid.2
+
+# 	calculate upper and lower 25th 75th quantiles of residuals
+upresid.2a<-quantile(subset(pred.y2a$resid.2a,z.u==levels(z.u)[1]),0.75,na.rm=T)
+lwresid.2a<-quantile(subset(pred.y2a$resid.2a,z.u==levels(z.u)[1]),0.25,na.rm=T)
+for (i in 2:zN.u){
+	upresid.2a<-cbind(upresid.2a,quantile(subset(pred.y2a$resid.2a,z.u==levels(z.u)[i]),0.75,na.rm=T))
+	lwresid.2a<-cbind(lwresid.2a,quantile(subset(pred.y2a$resid.2a,z.u==levels(z.u)[i]),0.25,na.rm=T))
+	}
+
+(GM.mod2a<-round(10^((GM-y0)*slope2a),0))			#Predicted GM boundary value for 1st factor (HA)
+(GMU.mod2a<-round(10^((GM-y0-upresid.2a)*slope2a),0))
+(GML.mod2a<-round(10^((GM-y0-lwresid.2a)*slope2a),0))
+(HG.mod2a<-round(10^((HG-y0)*slope2a),0))			#Predicted GM boundary value for 1st factor (HA)
+(HGU.mod2a<-round(10^((HG-y0-upresid.2a)*slope2a),0))
+(HGL.mod2a<-round(10^((HG-y0-lwresid.2a)*slope2a),0))
+
+(Sum.mod2a<-data.frame(
+	R2=c(round(summary(mod2a)[[9]],3)),
+	N=c(length(x.u)),
+	slope=c(1/slope2a),
+	int=c(y0),
+	GM =c(GM.mod2a),
+	GML=c(GML.mod2a),
+	GMU=c(GMU.mod2a),
+	HG =c(HG.mod2a),
+	HGL=c(HGL.mod2a),
+	HGU=c(HGU.mod2a),
+	row.names=levels(z.u)))
+
+#..........................................................................................
+#	Model 3a Standard Major Axis (SMA) regression (geometric average of models 1 & 2)
+#..........................................................................................
+# calculate the average slope and intercept of x on y and y on x
+
+(slope3a<-sign(slope1a)*sqrt(slope1a*1/slope2a))#geometric average or SMA regression
+int3a<-mean(y.u[z.u==levels(z.u)[1]])-(slope3a*mean(x.u[z.u==levels(z.u)[1]]))
+for (i in 2:zN.u){
+	int3a<-cbind(int3a,mean(y.u[z.u==levels(z.u)[i]])-(slope3a*mean(x.u[z.u==levels(z.u)[i]])))
+	}
+# Set up a data frame with observed x, factor z and add appropriate intercept value y0a for category
+# calculate predicted y values (EQR) and calculate residuals
+
+(pred.y3a<-data.frame(x.u,y.u,z.u,int3a[1]))
+colnames(pred.y3a)[4]<-"int3a.i"
+for (i in 2:zN.u){
+	pred.y3a<-within(pred.y3a,int3a.i[z.u==levels(z.u)[i]]<-int3a[i])
+	}
+(pred.y3a<-within(pred.y3a,pred.y3a<-x.u*slope3a+int3a.i))	#calc predicted values pred.y2
+(pred.y3a<-within(pred.y3a,resid.3a<-y.u-pred.y3a))
+	
+# 	calculate upper and lower 25th 75th quantiles of residuals
+upresid.3a<-quantile(subset(pred.y3a$resid.3a,z.u==levels(z.u)[1]),0.75,na.rm=T)
+lwresid.3a<-quantile(subset(pred.y3a$resid.3a,z.u==levels(z.u)[1]),0.25,na.rm=T)
+for (i in 2:zN.u){
+	upresid.3a<-cbind(upresid.3a,quantile(subset(pred.y3a$resid.3a,z.u==levels(z.u)[i]),0.75,na.rm=T))
+	lwresid.3a<-cbind(lwresid.3a,quantile(subset(pred.y3a$resid.3a,z.u==levels(z.u)[i]),0.25,na.rm=T))
+	}
+
+(GM.mod3a<-round(10^((GM-int3a)/slope3a),0))			#Predicted GM boundary value for 1st factor (HA)
+(GMU.mod3a<-round(10^((GM-int3a-upresid.3a)/slope3a),0))
+(GML.mod3a<-round(10^((GM-int3a-lwresid.3a)/slope3a),0))
+(HG.mod3a<-round(10^((HG-int3a)/slope3a),0))			#Predicted GM boundary value for 1st factor (HA)
+(HGU.mod3a<-round(10^((HG-int3a-upresid.3a)/slope3a),0))
+(HGL.mod3a<-round(10^((HG-int3a-lwresid.3a)/slope3a),0))
+
+(Sum.mod3a<-data.frame(
+	R2="",
+	N=c(length(x.u)),
+	slope=c(slope3a),
+	int=c(int3a),
+	GM =c(GM.mod3a),
+	GML=c(GML.mod3a),
+	GMU=c(GMU.mod3a),
+	HG =c(HG.mod3a),
+	HGL=c(HGL.mod3a),
+	HGU=c(HGU.mod3a),
+	row.names=levels(z.u)))
+```
+
+
+```{r, fig.width=6, fig.height = 8, fig.cap="Figure A 15 Output from TKit_fit_lm2 comparing models and showing ranges of (left) good/moderate and (right) high/good boundaries fitted to data grouped by lake type."}
+#	re-set scales for plotting
+xmin<- 5
+xmax<- 200
+ymin<- 0
+ymax<- 1.5
+
+MetricUsed<-"Phytoplankton"
+
+#	set up scales & labels for axis
+ylb<-"EQR" # Y axis label
+xlb<-expression(paste("total phosphorus ","(µg ", L^-1,")"))
+
+#win.graph(width=14,height=9)					# new graphic window
+par(mfcol=c(3,2)) 						# delete this line if separate plots are required
+par(mar=c(4,5,5,1))
+
+#	Fig A
+
+title<-"Regression of EQR on TP"
+
+plot(y~x2,ylim=c(ymin,ymax),xlim=c(xmin,xmax),main=title,log="x",ylab=ylb,xlab=xlb,
+	las=1)
+points(y.u~x2.u,pch=19,col=rainbow(zN.u)[z.u])
+new.x <- data.frame(x = seq(min(x, na.rm=T), max(x, na.rm=T), length = length(x)))#new values of X on log scale
+for (i in 1:zN.u){
+	lines(10^(new.x$x),new.x$x*slope1a+int1a[i],col=rainbow(zN.u)[i])
+	points(10^(mean(x.u[z.u==levels(z.u)[i]])),
+		mean(y.u[z.u==levels(z.u)[i]]),pch=3,cex=3,col=rainbow(zN.u)[i])
+	}
+legend("bottomleft",levels(z.u),col=rainbow(zN.u),pch=19,cex=1)
+	mtext(paste("R2=", round(summary(mod1a)$r.sq,3),sep=""), side = 3, line=0,adj=0, 
+	col="black",cex=0.8)
+	pvalue<-pf(summary(mod1a)[[10]][[1]],summary(mod1a)[[10]][[2]],summary(mod1a)[[10]][[3]],lower.tail=F)
+	if(pvalue >=0.001) {mtext(paste("p=", round(pvalue,3), sep=""),side = 3, line =0, adj = 0.25,
+	col = "black",cex=0.8)}
+	if(pvalue <0.001) {mtext("p<0.001", side = 3, line= 0, adj = 0.25, col="black",cex=0.8)}
+	mtext(paste("slope= ", round(slope1a,3)," se ",
+	round(summary(mod1a)[[4]][[7]],3),sep=""),side = 3,line=0,adj=0.75, col="black",cex=0.8)
+
+
+abline("h"=GM,lty=2)
+abline("v"=GM.mod1a,lty=2,col=rainbow(zN.u))
+text(xmin,GM,GM,cex=1,pos=3)
+text(GM.mod1a,ymin,GM.mod1a,pos=c(3,4),cex=1)
+
+#	Fig B
+title<-"Regression of TP on EQR"
+
+plot(y~x2,ylim=c(ymin,ymax),xlim=c(xmin,xmax),main=title,log="x",ylab=ylb,xlab=xlb,
+	las=1)
+points(y.u~x2.u,pch=19,col=rainbow(zN.u)[z.u])
+new.x <- data.frame(x = seq(min(x, na.rm=T), max(x, na.rm=T), length = length(x)))#new values of X on log scale
+for (i in 1:zN.u){
+	lines(10^(new.x$x),new.x$x*1/slope2a+y0[i],col=rainbow(zN.u)[i])
+	points(10^(mean(x.u[z.u==levels(z.u)[i]])),
+		mean(y.u[z.u==levels(z.u)[i]]),pch=3,cex=3,col=rainbow(zN.u)[i])
+	}
+	mtext(paste("R2=", round(summary(mod2a)$r.sq,3),sep=""), side = 3, line=0,adj=0, col="black",cex=0.8)
+	pvalue<-pf(summary(mod2a)[[10]][[1]],summary(mod2a)[[10]][[2]],summary(mod2a)[[10]][[3]],lower.tail=F)
+	if(pvalue >=0.001) {mtext(paste("p=", pvalue, sep=""),side = 3, line =0, adj = 0.25, col = "black",cex=0.8)}
+	if(pvalue <0.001) {mtext("p<0.001", side = 3, line= 0, adj = 0.25, col="black",cex=0.8)}
+	mtext(paste("slope= ", round(1/slope2a,3)," se ", 
+		round(summary(mod2a)[[4]][[7]],3),sep=""), side = 3, line=0,adj=0.75, col="black",cex=0.8)
+
+
+abline("h"=GM,lty=2)
+abline("v"=GM.mod2a,lty=2,col=rainbow(zN.u))
+text(xmin,GM,GM,cex=1,pos=3)
+text(GM.mod2a,ymin,GM.mod2a,pos=c(3,4),cex=1)
+
+#	Fig C
+title<-"Geometric mean (SMA) regression\nEQR v TP"
+
+plot(y~x2,ylim=c(ymin,ymax),xlim=c(xmin,xmax),main=title,log="x",ylab=ylb, xlab=xlb,las=1)
+points(y.u~x2.u,pch=19,col=rainbow(zN.u)[z.u])
+new.x <- data.frame(x = seq(min(x, na.rm=T), max(x, na.rm=T), length = length(x)))#new values of X on log scale
+for (i in 1:zN.u){
+	lines(10^(new.x$x),new.x$x*slope3a+int3a[i],col=rainbow(zN.u)[i])
+	points(10^(mean(x.u[z.u==levels(z.u)[i]])),
+		mean(y.u[z.u==levels(z.u)[i]]),pch=3,cex=3,col=rainbow(zN.u)[i])
+	}
+mtext(paste("slope= ", round(slope3a,3),sep=""), side = 3, line=0,adj=0.5, col="black",cex=0.8)
+abline("h"=GM,lty=2)
+abline("v"=GM.mod3a,lty=2,col=rainbow(zN.u))
+text(xmin,GM,GM,cex=1,pos=3)
+text(GM.mod3a,ymin,GM.mod3a,pos=c(3,4),cex=1)
+
+#	Fig D
+title<-""
+
+plot(y~x2,ylim=c(ymin,ymax),xlim=c(xmin,xmax),main=title,log="x",ylab=ylb,xlab=xlb,
+	las=1)
+points(y.u~x2.u,pch=19,col=rainbow(zN.u)[z.u])
+new.x <- data.frame(x = seq(min(x, na.rm=T), max(x, na.rm=T), length = length(x)))#new values of X on log scale
+for (i in 1:zN.u){
+	lines(10^(new.x$x),new.x$x*slope1a+int1a[i],col=rainbow(zN.u)[i])
+	points(10^(mean(x.u[z.u==levels(z.u)[i]])),
+		mean(y.u[z.u==levels(z.u)[i]]),pch=3,cex=3,col=rainbow(zN.u)[i])
+	}
+legend("bottomleft",levels(z.u),col=rainbow(zN.u),pch=19,cex=1)
+
+abline("h"=HG,lty=2)
+abline("v"=HG.mod1a,lty=2,col=rainbow(zN.u))
+text(xmin,HG,HG,cex=1,pos=3)
+text(HG.mod1a,ymin,HG.mod1a,pos=c(3,4),cex=1)
+
+#	Fig E
+title<-""
+
+plot(y~x2,ylim=c(ymin,ymax),xlim=c(xmin,xmax),main=title,log="x",ylab=ylb,xlab=xlb,
+	las=1)
+points(y.u~x2.u,pch=19,col=rainbow(zN.u)[z.u])
+new.x <- data.frame(x = seq(min(x, na.rm=T), max(x, na.rm=T), length = length(x)))#new values of X on log scale
+for (i in 1:zN.u){
+	lines(10^(new.x$x),new.x$x*1/slope2a+y0[i],col=rainbow(zN.u)[i])
+	points(10^(mean(x.u[z.u==levels(z.u)[i]])),
+		mean(y.u[z.u==levels(z.u)[i]]),pch=3,cex=3,col=rainbow(zN.u)[i])
+	}
+abline("h"=HG,lty=2)
+abline("v"=HG.mod2a,lty=2,col=rainbow(zN.u))
+text(xmin,HG,HG,cex=1,pos=3)
+text(HG.mod2a,ymin,HG.mod2a,pos=c(3,4),cex=1)
+
+#	Fig F
+title<-""
+
+plot(y~x2,ylim=c(ymin,ymax),xlim=c(xmin,xmax),main=title,log="x",ylab=ylb, xlab=xlb,las=1)
+points(y.u~x2.u,pch=19,col=rainbow(zN.u)[z.u])
+new.x <- data.frame(x = seq(min(x, na.rm=T), max(x, na.rm=T), length = length(x)))#new values of X on log scale
+for (i in 1:zN.u){
+	lines(10^(new.x$x),new.x$x*slope3a+int3a[i],col=rainbow(zN.u)[i])
+	points(10^(mean(x.u[z.u==levels(z.u)[i]])),
+		mean(y.u[z.u==levels(z.u)[i]]),pch=3,cex=3,col=rainbow(zN.u)[i])
+	}
+
+abline("h"=HG,lty=2)
+abline("v"=HG.mod3a,lty=2,col=rainbow(zN.u))
+text(xmin,HG,HG,cex=1,pos=3)
+text(HG.mod3a,ymin,HG.mod3a,pos=c(3,4),cex=1)
+```
+
+
+Following the plot, the model summary information and boundary values are collected and placed in a series of data frames called Out1, Out 2 etc, each containing the summary for a single water body type. The final line of extract below places the output into the clipboard enabling a paste to Excel etc
+
+```{r}
+for(i in 1:zN.u){
+		out<-data.frame(
+		Type=c(levels(z.u)[i],"",""),
+		R2=c(round(summary(mod1a)[[9]],3),"",round(summary(mod2a)[[9]],3)),
+		N=c(length(x.u),"",""),
+		slope=c(round(slope1a,3),round(slope3a,3),round(1/slope2a,3)),
+		int=c(round(int1a[i],3),round(int3a[i],3),round(y0[i],3)),
+		GM =c(GM.mod1a[i],GM.mod3a[i],GM.mod2a[i]),
+		GML=c(GML.mod1a[i],GML.mod3a[i],GML.mod2a[i]),
+		GMU=c(GMU.mod1a[i],GMU.mod3a[i],GMU.mod2a[i]),
+		HG =c(HG.mod1a[i],HG.mod3a[i],HG.mod2a[i]),
+		HGL=c(HGL.mod1a[i],HGL.mod3a[i],HGL.mod2a[i]),
+		HGU=c(HGU.mod1a[i],HGU.mod3a[i],HGU.mod2a[i]),
+		row.names=c("OLS EQR v TP","geometric mean regression","OLS TP v EQR"))
+		assign(paste("Out",i,sep=""),out)
+	}
+```
+
+The following lines show output on console and then place in clipboard.
+
+```{r}
+print(Out1)
+```
+
+```{r, eval = FALSE}
+write.table(Out1,"clipboard",sep="\t",row.names=F,col.names=F)
+# Now paste to Excel
+```
+
+<!-- The output is as follows, 1st row model 1, then model 3, finally model 2. -->
+<!--                           Type    R2   N  slope   int GM GML GMU HG HGL HGU -->
+<!-- OLS EQR v TP                HA 0.622 165 -0.562 1.549 49  29  72 21  13  32 -->
+<!-- geometric mean regression                -0.813 1.967 48  33  63 27  19  36 -->
+<!-- OLS TP v EQR                    0.68     -1.176 2.571 47  38  59 32  25  40 -->
+

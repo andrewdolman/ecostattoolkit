@@ -32,7 +32,7 @@ FName<-"DataTemplate_Example1.csv"
 (Note when entering a path into R use double \\ to separate directories as in example below)
 
 ```{r}
-FName<-"../../inst/extdata/DataTemplate_Example1.csv"
+FName <- system.file("extdata/DataTemplate_Example1.csv", package = "ecostattoolkit")
 ```
 
 Now read the data into a data.frame called data
@@ -107,7 +107,7 @@ Next load the data, which either has had outliers removed or marked. (note the f
 
 ```{r}
 #Enter file name and path
-FName<-"../../inst/extdata/DataTemplate_Example1.csv"
+FName <- system.file("extdata/DataTemplate_Example1.csv", package = "ecostattoolkit")
 
 #Get data and check
 data <- read.csv(file = FName, header = TRUE)
@@ -362,7 +362,7 @@ rm(list= ls())  # Clear data
 Enter file name and path
 
 ```{r}
-FName<-"../../inst/extdata/DataTemplate_Example2.csv"
+FName <- system.file("extdata/DataTemplate_Example1.csv", package = "ecostattoolkit")
 ```
 
 Get data and check
@@ -898,7 +898,7 @@ Prepare the R Session.
 rm(list= ls())  		# Clear data
 
 #Enter file name and path
-FName<-"../extdata/DataTemplate_Example2.csv"
+FName <- system.file("extdata/DataTemplate_Example2.csv", package = "ecostattoolkit")
 
 #Get data and check
 data <- read.csv(file = FName, header = TRUE)
