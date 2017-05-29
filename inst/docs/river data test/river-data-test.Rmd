@@ -47,6 +47,17 @@ river_test_data <- river_data_veg_mean_station %>%
     Group = River_type_WFD) 
 
 data <- river_test_data
+
+# create seperate .csv files for testing shiny app
+for(i in 1:length(data$Group))
+  
+plyr::d_ply(data, "Group", function(x)
+  write.csv(x, paste0("inst/extdata/types/River_type", unique(x$Group), ".csv"),
+            row.names = FALSE, fileEncoding = "Latin1"))
+  
+  
+  
+  
 ```
 
 
@@ -97,7 +108,7 @@ ylab="P",las=3)$out
 data %>% 
   ggplot(aes(x = as.factor(BioClass), y = P)) +
   geom_boxplot() +
-  facet_wrap(~Group, scales = "free_y")
+  facet_wrap(~Group, scales = "free_y") 
 ```
 
 
@@ -147,15 +158,6 @@ library(segmented)# segmented regression
 ```
 
 Next load the data, which either has had outliers removed or marked. (note the field Exclude is still required for script to run, even if all outliers have been removed, i.e. all records marked as Exclude = 0, as the variable name Exclude is included in the R scripts as a selection criteria)
-
-```{r}
-#Enter file name and path
-FName <- system.file("extdata/DataTemplate_Example1.csv", package = "ecostattoolkit")
-
-#Get data and check
-data <- read.csv(file = FName, header = TRUE)
-dim(data)
-```
 
 
 As many data sets will contain missing values the data are checked and a second data.frame called data.cc is created with no missing values, although in the example data set there are no missing values.
